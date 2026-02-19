@@ -9,7 +9,7 @@ library(plotly)
 
 # UI
 ui <- page_sidebar(
-  title = "Painel Estações – v0.1",
+  title = "Painel Estações – v0.2",
   
   sidebar = sidebar(
     # Card for menu ctrls
@@ -53,10 +53,10 @@ server <- function(input, output, session) {
     "18"  = "Luminosidade (lux)",
     "19"  = "UV (uv)",
     "22"  = "Ponto de Orvalho (°C)",
-    "23"  = "Pressão (hPa)",
+    "23"  = "Pressão (hPa)", 
     "27"  = "Sensação térmica (°C)",
-    "28"  = "Delta T (°C)",
-    "34"  = "Nivel de líquidos (mca)",
+    "28"  = "Delta T (°C)", 
+    "34"  = "Nivel de líquidos (mca)", 
     "35"  = "Chuva (mm)",
     "36"  = "Vento (km/h)",
     "37"  = "Rajada (km/h)",
@@ -69,8 +69,14 @@ server <- function(input, output, session) {
     
     # Temperature related
     "8"  = list(type = "scatter", mode = "lines", color = "#e63946"), ## T°
-    "22" = list(type = "scatter", mode = "lines", color = "#228b22"), ## Ponto de Orvalo (WTF is that??)
     "27" = list(type = "scatter", mode = "lines", color = "#f4a261"), ## Sensação térmica
+    
+    # Delta T
+    "28" = list(type = "scatter", mode = "lines", color = "#e5e619"), ## Delta T
+    "22" = list(type = "scatter", mode = "lines", color = "#228b22"), ## Ponto de Orvalo (WTF is that??)
+    
+    # Pressure
+    "23" = list(type = "scatter", mode = "lines", color = "#800080"), ## Pressão (atmosferica??)
     
     # Humidity
     "11" = list(type = "scatter", mode = "lines", color = "#457b9d"), ## Umidade
@@ -78,13 +84,16 @@ server <- function(input, output, session) {
     # Rain
     "35" = list(type = "bar",     mode = NULL,     color = "#2a9d8f"), ## Chuva (acumulada?)
     
+    # Liquid level
+    "34" = list(type = "bar",     mode = NULL,     color = "#00009c"), ## Nivel de liquidos
+    
     # Wind (speed I think)
     "36"  = list(type = "scatter", mode = "lines", color = "#264653"), ## Vento 
     "347" = list(type = "scatter", mode = "lines", color = "#264653"), ## Vento - pq 2 cod ?
     
     # Wind gust
-    "37"  = list(type = "scatter", mode = "lines", color = "#6d597a"), ## Rajadas de vento
-    "348" = list(type = "scatter", mode = "lines", color = "#6d597a"), ## Rajadas de vento - de novo pq 2 cod ?
+    "37"  = list(type = "scatter", mode = "lines", color = "#19b2e6"), ## Rajadas de vento
+    "348" = list(type = "scatter", mode = "lines", color = "#19b2e6"), ## Rajadas de vento - de novo pq 2 cod ?
     
     # Luminosity
     "18" = list(type = "scatter", mode = "lines", color = "#ffbe0b"), ## Chuva
@@ -98,12 +107,15 @@ server <- function(input, output, session) {
   
   # Categories definition (for dropdown and plots rendering)
   categories <- list(
-    Temperatura = c("8", "22", "27"),
-    Umidade     = c("11"),
-    Chuva       = c("35"),
-    Vento       = c("36", "347", "37", "348"),
-    Luminosidade= c("18"),
-    UV          = c("19")
+    Temperatura = list(ids=c("8", "27"), unit="°C"),
+    "Delta T" = list(ids=c("28", "22"), unit="°C"),
+    Umidade = list(ids=c("11"), unit="%"),
+    Pressão = list(ids=c("23"), unit="hPa"),
+    Chuva = list(ids=c("35"), unit="mm"),
+    "Nivel de Liquidos" = list(ids=c("34"), unit="mca"),
+    Vento = list(ids=c("36", "347", "37", "348"), unit="Km/h"),
+    Luminosidade = list(ids=c("18"), unit="lux"),
+    UV = list(ids=c("19"), unit="uv")
   )
   
   # DB Connection (via DuckDB)
@@ -278,8 +290,9 @@ server <- function(input, output, session) {
       # Get category name
       category_name <- sub("cat_", "", selected) ## remove category prefix
       
-      # GEt sensors from the category
-      sensor_ids <- categories[[category_name]]
+      # GEt sensors and units from the category
+      sensor_ids <- categories[[category_name]]$ids ## take cat names
+      unit_label <- categories[[category_name]]$unit ## take cat units
       
       # Only picks sensors from the selected category within the 24-hour window
       df <- df_all |>
@@ -301,6 +314,7 @@ server <- function(input, output, session) {
       } else {
         paste("Sensor", selected) ## for missing sensors
       }
+      unit_label <- "" ## no units for missing values (for now)
     }
     
     # Placeholder plot
@@ -331,7 +345,11 @@ server <- function(input, output, session) {
           mode = config$mode,
           name = sensor_name,
           line = list(color = config$color),
-          marker = list(color = config$color)
+          text = ~paste0(
+            "Hora: ", format(time, "%H:%M"), "h",
+            "<br>Valor: ", value, " ", unit_label
+          ),
+          hoverinfo = "text"
         )
     }
     
@@ -354,16 +372,16 @@ server <- function(input, output, session) {
         )
     }
     
-    # Final uv graph layout
+    # Final graph layout
     p |>
       layout(
         title = paste("Station:", input$station, "|", plot_title),
         xaxis = list(
-          title = "Time",
+          title = "Hora",
           tickformat = "%H:%M\n%b %d"
         ),
         yaxis = list(
-          title = plot_title,
+          title = "", ## Remove title for now
           automargin = TRUE
         ),
         margin = list(l = 70, r = 20, t = 60, b = 60)
