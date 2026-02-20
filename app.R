@@ -6,7 +6,6 @@ library(duckdb) ## Embedded database - optimized for data analysis (like SQLite 
 library(dplyr) ## df manipulation
 library(lubridate) ## time manipulation
 library(plotly) ## interactive charts
-library(echarts4r) ## charts for KPI
 library(fontawesome) ## i tooltip icon
 
 # -------------------------
@@ -16,7 +15,7 @@ library(fontawesome) ## i tooltip icon
 # Fix rendering logo issue
 addResourcePath("static", "www") ## will need this on production?
 
-# UI Logic
+# UI LOGIG ----------------
 ui <- bslib::page_sidebar(
   title = tags$div(
     style = "display:flex; align-items:center; gap:0.75rem;",
@@ -151,11 +150,11 @@ ui <- bslib::page_sidebar(
             class = "kpi-title",
             tags$span(
               icon("thermometer-half", class = "me-2"),
-              "Temperatura (°C)"
+              "Temperatura"
             ),
             bslib::tooltip(
               tags$span(icon("info-circle")),
-              "Dados das últimas 24 horas (conforme disponibilidade no banco de dados).",
+              "Dados mais recentes conforme disponibilidade no banco de dados.",
               placement = "top"
             ) 
           ) 
@@ -163,7 +162,8 @@ ui <- bslib::page_sidebar(
         
         # Body card
         bslib::card_body(
-          tags$div(class = "kpi-chart", "eCharts") ## placeholder data
+          uiOutput("temp_value"),
+          tags$div(class = "kpi-sub", uiOutput("temp_sub")) 
         ) 
       ), 
       
@@ -176,11 +176,11 @@ ui <- bslib::page_sidebar(
             class = "kpi-title",
             tags$span(
               icon("cloud-rain"),
-              "Chuva (mm)"
+              "Chuva"
             ),
             bslib::tooltip(
               tags$span(icon("info-circle")),
-              "Dados das últimas 24 horas (conforme disponibilidade no banco de dados).",
+              "Dados mais recentes conforme disponibilidade no banco de dados.",
               placement = "top"
             ) 
           ) 
@@ -188,7 +188,8 @@ ui <- bslib::page_sidebar(
         
         # Body card
         bslib::card_body(
-          tags$div(class = "kpi-chart", "eCharts")
+          uiOutput("rain_value"),
+          tags$div(class = "kpi-sub", uiOutput("rain_sub"))
         ) 
       ), 
       
@@ -201,11 +202,11 @@ ui <- bslib::page_sidebar(
             class = "kpi-title",
             tags$span(
               icon("gauge-high", class = "me-2"),
-              "Pressão (hPa)"
+              "Pressão"
             ),
             bslib::tooltip(
               tags$span(icon("info-circle")),
-              "Dados das últimas 24 horas (conforme disponibilidade no banco de dados).",
+              "Dados mais recentes conforme disponibilidade no banco de dados..",
               placement = "top"
             ) 
           ) 
@@ -213,7 +214,8 @@ ui <- bslib::page_sidebar(
         
         # Body card
         bslib::card_body(
-          tags$div(class = "kpi-chart", "eCharts")
+          uiOutput("pressure_value"),
+          tags$div(class = "kpi-sub", uiOutput("pressure_sub"))
         ) 
       ), 
       
@@ -226,25 +228,26 @@ ui <- bslib::page_sidebar(
             class = "kpi-title",
             tags$span(
               icon("wind", class = "me-2"),
-              "Vento (km)"
+              "Vento"
             ),
             bslib::tooltip(
               tags$span(icon("info-circle")),
-              "Dados das últimas 24 horas (conforme disponibilidade no banco de dados).",
+              "Dados mais recentes conforme disponibilidade no banco de dados.",
               placement = "top"
             ) 
           ) 
         ), 
         
         bslib::card_body(
-          tags$div(class = "kpi-chart", "eCharts")
+          uiOutput("wind_value"),
+          tags$div(class = "kpi-sub", uiOutput("wind_sub"))
         ) 
       ) 
     ), 
     
     # Main plot card ----------------
     bslib::card(
-      full_screen = TRUE,
+      full_screen = TRUE, ## adds expand button in the top-right corner
       bslib::card_header(
         "Dados das últimas 24 horas em relação à data selecionada."
       ),
@@ -286,8 +289,10 @@ ui <- bslib::page_sidebar(
 # SERVER
 # -------------------------
 
-# Server logic
+# SERVER LOGIC -----------------------------
 server <- function(input, output, session) {
+  
+  # LABEL (VARIABLE NAMES) DICTONARIES ----------------------
   
   # Sensor label dictionary (to be shown in the dropdownmenu) - Is there is a better implementation of this?
   sensor_labels <- c(
@@ -351,7 +356,7 @@ server <- function(input, output, session) {
   # Categories definition (for dropdown and plots rendering)
   categories <- list(
     Temperatura = list(ids=c("8", "27"), unit="°C"),
-    "Delta T" = list(ids=c("28", "22"), unit="°C"),
+    "Delta T" = list(ids=c("28", "22"), unit="°C"), ## OBS. Nomes sem espaço - não esquecer
     Umidade = list(ids=c("11"), unit="%"),
     Pressão = list(ids=c("23"), unit="hPa"),
     Chuva = list(ids=c("35"), unit="mm"),
@@ -361,7 +366,7 @@ server <- function(input, output, session) {
     UV = list(ids=c("19"), unit="uv")
   )
   
-  # DB Connection (via DuckDB)
+  # DB CONNECTION (via DuckDB) ----------------
   con <- DBI::dbConnect(
     duckdb::duckdb(),
     file.path("data", "estacoes.duckdb")
@@ -370,6 +375,8 @@ server <- function(input, output, session) {
   session$onSessionEnded(function() {
     DBI::dbDisconnect(con, shutdown = TRUE) ## Close DB conn
   })
+  
+  # INPUT PIPELINE ----------------
   
   # Populate stations dropdown
   station_names <- DBI::dbListTables(con) ## List ALL stations (tables) - Era o que o Rapha queria? Perguntar
@@ -458,8 +465,10 @@ server <- function(input, output, session) {
     
   }, ignoreInit = TRUE) ## OBS. observeEvent - apenas executa o bloco quando selecioanr outra estação - Usar para evitar rodar quando iniciar o app
   
+  # PREPARING DATA FOR PLOTING -----------
   
-  # Fetch last available 24h data (for ALL sensors) - preparing data for plots
+  # Data pipeline to plotting charts ------
+  # Fetch last available 24h data (for ALL sensors) according to input changes
   sensor_data <- reactive({
     
     # Conditional input logic
@@ -471,7 +480,7 @@ server <- function(input, output, session) {
       paste0("SELECT DISTINCT DATE(time) as d FROM ", input$station)
     )
     
-    # Convert available dates as date
+    # Convert available dates as date format
     available_dates <- as.Date(dates_df$d)
     
     # Covert selected dates as date
@@ -513,8 +522,117 @@ server <- function(input, output, session) {
       dplyr::collect() ## actual DB query 
   })
   
+  # Data pipeline to ploting KPI cards ------------
+  # Fetch latest hour from KPI specific sensors
+  latest_data <- reactive({
+    
+    req(input$station)
+    
+    sensor_ids <- c(8, 23, 35, 36, 347)
+    sensor_sql <- paste(sensor_ids, collapse = ", ")
+    
+    DBI::dbGetQuery(
+      con,
+      paste0(
+        "SELECT sensor, time, value FROM ", input$station,
+        " WHERE sensor IN (", sensor_sql, ")",
+        " AND time = (SELECT MAX(time) FROM ", input$station, ")"
+      )
+    )
+  })
   
-  # Render plot in the UI
+  # Get each sensor value
+  get_sensor_value <- function(sensor_id) {
+    df <- latest_data()
+    df$value[df$sensor == sensor_id][1]
+  }
+  
+  
+  # PLOTING DATA-------------------
+  
+  # Render KPI charts -------------
+  # Temperature KPI Card
+  output$temp_value <- renderUI({
+    value <- get_sensor_value(8)
+    tags$div(class = "kpi-value", paste0(value, " °C"))
+  })
+  
+  # Rain KPI CArd
+  output$rain_value <- renderUI({
+    value <- get_sensor_value(35)
+    tags$div(class = "kpi-value", paste0(value, " mm"))
+  })
+  
+  # Pressure KPI Card
+  output$pressure_value <- renderUI({
+    value <- get_sensor_value(23)
+    tags$div(class = "kpi-value", paste0(value, " hPa"))
+  })
+  
+  # Wind KPI Card
+  output$wind_value <- renderUI({
+    
+    req(input$station)
+    
+    df <- latest_data()
+    req(nrow(df) > 0)
+    
+    # Get wind value (sensor 36 or 347)
+    value <- df$value[df$sensor %in% c(36, 347)][1]
+    
+    req(!is.na(value))
+    
+    tags$div(
+      class = "kpi-value",
+      paste0(round(value, 1), " km/h")
+    )
+  })
+  
+  # Formatting KPI Cards subtitles ------------------
+  formatted_time <- reactive({
+    df <- latest_data()
+    if (nrow(df) == 0) return(NULL)
+    format(df$time[1], "%Y-%m-%d %H:%M")
+  })
+  
+  # Temperature
+  output$temp_sub <- renderUI({
+    tagList(
+      input$station,
+      tags$br(),
+      formatted_time()
+    )
+  })
+  
+  # Rain
+  output$rain_sub <- renderUI({
+    tagList(
+      input$station,
+      tags$br(),
+      formatted_time()
+    )
+  })
+  
+  # Pressure
+  output$pressure_sub <- renderUI({
+    tagList(
+      input$station,
+      tags$br(),
+      formatted_time()
+    )
+  })
+  
+  # Wind
+  output$wind_sub <- renderUI({
+    tagList(
+      input$station,
+      tags$br(),
+      formatted_time()
+    )
+  })
+  
+  
+  # Render Main charts ------------
   output$sensor_plot <- renderPlotly({
     
     # Conditional input Logic 
@@ -615,7 +733,7 @@ server <- function(input, output, session) {
         )
     }
     
-    # Final graph layout
+    # Final plot layout
     p |>
       layout(
         title = paste("Station:", input$station, "|", plot_title),
