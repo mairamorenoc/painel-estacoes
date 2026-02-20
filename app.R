@@ -1,49 +1,292 @@
 # Load requeired libraries
-library(shiny)
-library(bslib)
-library(DBI)
-library(duckdb)
-library(dplyr)
-library(lubridate)
-library(plotly)
+library(shiny) 
+library(bslib) ## dashboard UI
+library(DBI) ## R Database Interface
+library(duckdb) ## Embedded database - optimized for data analysis (like SQLite but better)
+library(dplyr) ## df manipulation
+library(lubridate) ## time manipulation
+library(plotly) ## interactive charts
+library(echarts4r) ## charts for KPI
+library(fontawesome) ## i tooltip icon
 
+# -------------------------
 # UI
-ui <- page_sidebar(
-  title = "Painel Estações – v0.2",
-  
-  sidebar = sidebar(
-    # Card for menu ctrls
-    card(
-      card_header("Selecione uma opção"),
-      
-      # Dropdown menus
-      selectInput(
-        inputId = "station",
-        label   = "Selecione uma estação",
-        choices = NULL
-      ),
-      
-      dateInput(
-        inputId = "selected_date",
-        label   = "Selecione uma data",
-        value   = NULL  ## I'll probably need here Sys.Date() val when the app goes to production
-      ),
-      
-      selectInput(
-        inputId = "sensor",
-        label   = "Selecione o indicador meteorológico",
-        choices = NULL
-      )
-    )
+# -------------------------
+
+# Fix rendering logo issue
+addResourcePath("static", "www") ## will need this on production?
+
+# UI Logic
+ui <- bslib::page_sidebar(
+  title = tags$div(
+    style = "display:flex; align-items:center; gap:0.75rem;",
+    tags$img(
+      src = "static/logo_ocs.png", ## add static/ to properly render img
+      style = "height:32px;"
+    ),
+    tags$span("Painel Estações – v0.3")
   ),
   
-  card(
-    card_header("Dados das últimas 24 horas em relação à data selecionada"),
-    plotlyOutput("sensor_plot", height = "500px") # Placeholder card for the rendered plot
-  )
-)
+  # ui theme
+  theme = bslib::bs_theme(
+    version = 5,  ## boostrap v5
+    bootswatch = "flatly", ## boostrap theme
+    base_font =  bslib::font_google("Inter"), ## Google font
+    
+    # Custom header colors
+    "navbar-bg" = "#87ADA2",   
+    "navbar-fg" = "white"
+  ), 
+  
+  # CSS for ui style
+  ## tags$head to create <head> HTML tag
+  ## tags$style to create <style> HTML tag -> uses HTML CSS class (.card, .kpi-grid, etc.)
+  ## @media rules for responsive design - DON't FORGET to always add tem!
+  tags$head(
+    tags$style(HTML("
+      /* CSS for cards feel modern */
+      .card {
+        border-radius: 16px;
+        box-shadow: 0 8px 24px rgba(0,0,0,.06);
+        border: 1px solid rgba(0,0,0,.06);
+      }
 
+      /* Sidebar spacing */
+      .bslib-sidebar-layout .sidebar {
+        padding-top: 0.75rem;
+      }
+
+      /* KPI grid */
+      .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.75rem;
+      }
+      @media (max-width: 992px) {
+        .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+      @media (max-width: 576px) {
+        .kpi-grid { grid-template-columns: 1fr; }
+      }
+
+      /* KPI title row: title + info icon */
+      .kpi-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+      }
+      .kpi-value {
+        font-size: 1.6rem;
+        font-weight: 700;
+        line-height: 1.1;
+        margin-top: 0.25rem;
+      }
+      .kpi-sub {
+        font-size: 0.85rem;
+        color: rgba(0,0,0,.55);
+        margin-bottom: 0.5rem;
+      }
+
+      /* Placeholder area for mini charts */
+      .kpi-chart {
+        height: 90px;
+        border-radius: 12px;
+        background: rgba(0,0,0,.03);
+        border: 1px dashed rgba(0,0,0,.15);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: rgba(0,0,0,.45);
+        font-size: 0.9rem;
+      }
+
+      /* Animations for icons */
+      .kpi-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .kpi-title i {
+      transition: transform 0.3s ease, color 0.3s ease;
+    }
+
+    .kpi-title:hover i {
+      transform: scale(1.2);
+      color: #0d6efd;
+    }
+    ")) 
+  ), 
+  
+  # SIDEBAR --------------------
+  sidebar = bslib::sidebar(
+    
+    # Info section ----------------
+    bslib::card(
+      bslib::card_header("Sobre a ferramenta"),
+      tags$div(
+        style = "display:flex; flex-direction:column; gap:.5rem;",
+        tags$small("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.")
+      ) 
+    ) 
+  ), 
+  
+  # MAIN --------------------
+  # Layout grid
+  bslib::layout_column_wrap(
+    width = 1, ## each KPI card item takes 1 grid unit
+    heights_equal = "row", ## more card height
+    
+    # KPI DIV (for 4 cards) ---------------
+    tags$div(
+      class = "kpi-grid", ## CSS class defined previously
+      
+      # Card 1 - Temperature
+      # Main card
+      bslib::card(
+        # HEader card
+        bslib::card_header(
+          tags$div(
+            class = "kpi-title",
+            tags$span(
+              icon("thermometer-half", class = "me-2"),
+              "Temperatura (°C)"
+            ),
+            bslib::tooltip(
+              tags$span(icon("info-circle")),
+              "Dados das últimas 24 horas (conforme disponibilidade no banco de dados).",
+              placement = "top"
+            ) 
+          ) 
+        ), 
+        
+        # Body card
+        bslib::card_body(
+          tags$div(class = "kpi-chart", "eCharts") ## placeholder data
+        ) 
+      ), 
+      
+      # Card 2 - Rain
+      # Main card
+      bslib::card(
+        # Header card
+        bslib::card_header(
+          tags$div(
+            class = "kpi-title",
+            tags$span(
+              icon("cloud-rain"),
+              "Chuva (mm)"
+            ),
+            bslib::tooltip(
+              tags$span(icon("info-circle")),
+              "Dados das últimas 24 horas (conforme disponibilidade no banco de dados).",
+              placement = "top"
+            ) 
+          ) 
+        ), 
+        
+        # Body card
+        bslib::card_body(
+          tags$div(class = "kpi-chart", "eCharts")
+        ) 
+      ), 
+      
+      # Card 3 - Pressure
+      # Main card
+      bslib::card(
+        # Header card
+        bslib::card_header(
+          tags$div(
+            class = "kpi-title",
+            tags$span(
+              icon("gauge-high", class = "me-2"),
+              "Pressão (hPa)"
+            ),
+            bslib::tooltip(
+              tags$span(icon("info-circle")),
+              "Dados das últimas 24 horas (conforme disponibilidade no banco de dados).",
+              placement = "top"
+            ) 
+          ) 
+        ), 
+        
+        # Body card
+        bslib::card_body(
+          tags$div(class = "kpi-chart", "eCharts")
+        ) 
+      ), 
+      
+      # Card 4 - Wind
+      # Main card
+      bslib::card(
+        # Header card
+        bslib::card_header(
+          tags$div(
+            class = "kpi-title",
+            tags$span(
+              icon("wind", class = "me-2"),
+              "Vento (km)"
+            ),
+            bslib::tooltip(
+              tags$span(icon("info-circle")),
+              "Dados das últimas 24 horas (conforme disponibilidade no banco de dados).",
+              placement = "top"
+            ) 
+          ) 
+        ), 
+        
+        bslib::card_body(
+          tags$div(class = "kpi-chart", "eCharts")
+        ) 
+      ) 
+    ), 
+    
+    # Main plot card ----------------
+    bslib::card(
+      full_screen = TRUE,
+      bslib::card_header(
+        "Dados das últimas 24 horas em relação à data selecionada."
+      ),
+      
+      # Small control bar
+      bslib::layout_columns(
+        col_widths = c(4, 4, 4), ## 3 equal columns (12 col layout)
+        # Stations (locations) selector dropdown
+        selectInput(
+          inputId = "station",
+          label = "Estação/local",
+          choices = NULL ## keep empty bc this will populate dinamycaly
+        ),
+        # Calendar selector dropdown 
+        dateInput(
+          inputId = "selected_date",
+          label = "Data", 
+          value = NULL
+        ),
+        # Sensor (climate variables) selector dropdown
+        selectInput(
+          inputId = "sensor",
+          label = "Indicador",
+          choices = NULL
+        )
+      ), 
+      
+      # Add spacing
+      br(),
+      
+      # Render plot
+      plotlyOutput("sensor_plot", height = "600px")
+    ) 
+  ) 
+) 
+
+
+# -------------------------
 # SERVER
+# -------------------------
+
+# Server logic
 server <- function(input, output, session) {
   
   # Sensor label dictionary (to be shown in the dropdownmenu) - Is there is a better implementation of this?
