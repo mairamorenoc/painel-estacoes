@@ -19,11 +19,18 @@ addResourcePath("static", "www") ## will need this on production?
 ui <- bslib::page_sidebar(
   title = tags$div(
     style = "display:flex; align-items:center; gap:0.75rem;",
-    tags$img(
-      src = "static/logo_ocs.png", ## add static/ to properly render img
-      style = "height:32px;"
+    tags$a(
+      href = "https://climaesaude.icict.fiocruz.br/",
+      target = "_blank",
+      tags$img(
+        src = "static/logo_ocs.png",
+        style = "height:54px;"
+      )
     ),
-    tags$span("Painel Estações – v0.3")
+    tags$span(
+      "Painel de Estações Meteorológicas",
+      style = "font-weight:600; font-size:1.1rem;"
+    )     
   ),
   
   # ui theme
@@ -33,8 +40,8 @@ ui <- bslib::page_sidebar(
     base_font =  bslib::font_google("Inter"), ## Google font
     
     # Custom header colors
-    "navbar-bg" = "#87ADA2",   
-    "navbar-fg" = "white"
+    "navbar-bg" = "#bbd0c9",   
+    "navbar-fg" = "black"
   ), 
   
   # CSS for ui style
@@ -43,7 +50,7 @@ ui <- bslib::page_sidebar(
   ## @media rules for responsive design - DON't FORGET to always add tem!
   tags$head(
     tags$style(HTML("
-      /* CSS for cards feel modern */
+      /* CSS for cards */
       .card {
         border-radius: 16px;
         box-shadow: 0 8px 24px rgba(0,0,0,.06);
@@ -53,6 +60,37 @@ ui <- bslib::page_sidebar(
       /* Sidebar spacing */
       .bslib-sidebar-layout .sidebar {
         padding-top: 0.75rem;
+      }
+      
+      .card-sub {
+        font-size: 0.85rem;
+        color: rgba(0, 0, 0, 0.64);
+        margin-bottom: 0.5rem;
+      }
+
+      .card-sub small {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+      }
+
+      .card-sub i {
+        transition: transform 0.3s ease, color 0.3s ease;
+      }
+
+      .card-sub small:hover i {
+        transform: scale(1.2);
+        color: #0d6efd;
+       }
+
+      .card-sub a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .card-sub a:hover {
+         text-decoration: underline;
       }
 
       /* KPI grid */
@@ -123,13 +161,33 @@ ui <- bslib::page_sidebar(
     
     # Info section ----------------
     bslib::card(
-      bslib::card_header("Sobre a ferramenta"),
+      bslib::card_header("Sobre o Painel"),
       tags$div(
         style = "display:flex; flex-direction:column; gap:.5rem;",
-        tags$small("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.")
+        tags$small(
+          "Este painel interativo foi desenvolvido para a visualização e o monitoramento de dados climáticos provenientes de estações meteorológicas localizadas no Brasil."
+        )
       ) 
-    ) 
-  ), 
+    ),
+    
+    # Contact section ----------------
+    bslib::card(
+      bslib::card_header("Contato"),
+      tags$div(
+        style = "display:flex; flex-direction:column; gap:.5rem;",
+        tags$div(
+          class = "card-sub",
+          tags$small(
+            icon("envelope"),
+            tags$a(
+              href = "mailto:obs.climaesaude@fiocruz.br",
+              "obs.climaesaude@fiocruz.br"
+            )
+          )
+        )
+      )
+    )
+  ),  
   
   # MAIN --------------------
   # Layout grid
@@ -249,7 +307,19 @@ ui <- bslib::page_sidebar(
     bslib::card(
       full_screen = TRUE, ## adds expand button in the top-right corner
       bslib::card_header(
-        "Dados das últimas 24 horas em relação à data selecionada."
+        tags$div(
+          class = "kpi-title",
+          tags$span(
+            icon("chart-line", class = "me-2"),
+            "Explorar Indicadores Climáticos"
+          ),
+          bslib::tooltip(
+            tags$span(icon("info-circle")),
+            "Dados das últimas 24 horas em relação à data selecionada.",
+            placement = "top"
+          )
+        )
+        
       ),
       
       # Small control bar
