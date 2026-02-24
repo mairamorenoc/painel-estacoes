@@ -16,6 +16,7 @@ library(fontawesome) ## i tooltip icon
 addResourcePath("static", "www") ## will need this on production?
 
 # UI LOGIG ----------------
+
 ui <- bslib::page_sidebar(
   title = tags$div(
     style = "display:flex; align-items:center; gap:0.75rem;",
@@ -264,7 +265,7 @@ ui <- bslib::page_sidebar(
             ),
             bslib::tooltip(
               tags$span(icon("info-circle")),
-              "Dados mais recentes conforme disponibilidade no banco de dados..",
+              "Dados mais recentes conforme disponibilidade no banco de dados.",
               placement = "top"
             ) 
           ) 
@@ -315,7 +316,7 @@ ui <- bslib::page_sidebar(
           ),
           bslib::tooltip(
             tags$span(icon("info-circle")),
-            "Dados das últimas 24 horas em relação à data selecionada.",
+            "Selecione uma Estação/local e, em seguida, escolha um indicador para visualizar, no gráfico, as condições climáticas da região.",
             placement = "top"
           )
         )
@@ -352,8 +353,7 @@ ui <- bslib::page_sidebar(
       plotlyOutput("sensor_plot", height = "600px")
     ) 
   ) 
-) 
-
+)
 
 # -------------------------
 # SERVER
@@ -579,14 +579,15 @@ server <- function(input, output, session) {
       ))
     }
     
-    # Calculate the start of the 24-hour window
-    start_time <- last_time - lubridate::days(1) ## exactly 24 hours - OBS. Rever com Rapha se procede 
+    # Get daily data for main chart plots
+    start_time <- as.POSIXct(selected_date)
+    end_time   <- start_time + lubridate::days(1) ## Adds 24h to start_time. Takes everything btw 00:00 to 00:00
     
     # "Lazy" DB reference 
     dplyr::tbl(con, input$station) |>
       dplyr::filter(
         time >= start_time,
-        time <= last_time
+        time < end_time
       ) |>
       dplyr::select(sensor, time, value) |>
       dplyr::collect() ## actual DB query 
