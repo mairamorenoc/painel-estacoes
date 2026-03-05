@@ -7,6 +7,12 @@ server <- function(input, output, session) {
   
   # LABEL LIST/DICTONARIES ----------------------
   
+  # Label dictionary to naming stations
+  station_labels <- c (
+    "tb_estacao_1b" = "Merajuba/Mocajuba, PA",
+    "tab_estacao_3" = "Favela da Maré, RJ"
+  )
+
   
   # Label dictionary to naming sensors (climate variables) on dropdown menu
   sensor_labels <- c(
@@ -104,12 +110,23 @@ server <- function(input, output, session) {
   # Detect available stations (tables) 
   station_names <- DBI::dbListTables(con) ## List ALL available stations
   
+  station_choices <- setNames(
+    station_names,
+    sapply(station_names, function(id) {
+      if(id %in% names(station_labels)) {
+        station_labels[id]
+      } else {
+        paste("Estação", id)
+      }
+    })
+  )
+  
   
   # Update and populate dropdown menu with the available retrieved stations 
   updateSelectInput(
     session,
     "station",
-    choices  = station_names, ## adds listed stations to the dropdown  
+    choices  = station_choices, ## adds listed and unlisted stations to the dropdown  
     selected = station_names[1] ## choose the fisrt table as default one
   ) ## OBS. Sem diccionario para nomes de estacoes por enquanto!
   
@@ -268,6 +285,19 @@ server <- function(input, output, session) {
   
   # PLOTING DATA-----------------------------------------
   
+  # Get station names for plots labeling
+  station_nm <- reactive({
+    
+    req(input$station)
+    
+    if(input$station %in% names(station_labels)) {
+      station_labels[[input$station]]
+    } else {
+      paste("Estação", input$station)
+    }
+    
+  })
+  
   # Render KPI charts ----------------------------------
   
   # Temperature KPI Card
@@ -319,7 +349,7 @@ server <- function(input, output, session) {
   # Temperature
   output$temp_sub <- renderUI({
     tagList(
-      input$station,
+      station_nm(), ## OBS. NAO esquecer () -> is reactive!
       tags$br(),
       formatted_time()
     )
@@ -328,7 +358,7 @@ server <- function(input, output, session) {
   # Rain
   output$rain_sub <- renderUI({
     tagList(
-      input$station,
+      station_nm(),
       tags$br(),
       formatted_time()
     )
@@ -337,7 +367,7 @@ server <- function(input, output, session) {
   # Pressure
   output$pressure_sub <- renderUI({
     tagList(
-      input$station,
+      station_nm(),
       tags$br(),
       formatted_time()
     )
@@ -346,7 +376,7 @@ server <- function(input, output, session) {
   # Wind
   output$wind_sub <- renderUI({
     tagList(
-      input$station,
+      station_nm(),
       tags$br(),
       formatted_time()
     )
@@ -362,7 +392,9 @@ server <- function(input, output, session) {
     req(input$sensor)
     
     # Logic to avoid empty plot when no data
-    df_all <- sensor_data() ## Execute sensor_data block code and pass it to a df
+    df_all <- sensor_data() |> ## Execute sensor_data block code and pass it to a df
+      dplyr::distinct(sensor, time, .keep_all = TRUE) ## Keep only 1 row for each sensor and time
+    
     req(nrow(df_all) > 0) ## Run code only if there any rows on df
     
     # Get selected sensor
@@ -437,7 +469,8 @@ server <- function(input, output, session) {
             "Hora: ", format(time, "%H:%M"), "h",
             "<br>Valor: ", value, " ", unit_label
           ),
-          hoverinfo = "text"
+          hoverinfo = "text",
+          textposition = "none" ## Removes hovet text from bar charts
         ) ## OBS. add_trace() method permite plotar different chart types on the same graph
     }
     
@@ -466,7 +499,7 @@ server <- function(input, output, session) {
     # Final plot layout that will rendered ------------------------------------------------------
     p |>
       layout(
-        title = paste("Station:", input$station, "|", plot_title),
+        title = paste(station_nm(), "|", plot_title),
         xaxis = list(
           title = "Hora",
           tickformat = "%H:%M\n%b %d"
@@ -475,7 +508,14 @@ server <- function(input, output, session) {
           title = "", ## Remove title for now
           automargin = TRUE
         ),
-        margin = list(l = 70, r = 20, t = 60, b = 60)
+        
+        legend = list(
+          orientation = "h", ## place legend text horizontal
+          x = 0,
+          y = -0.25 ## place legend bellow and to the left of plotting area
+        ),
+        
+        margin = list(l = 70, r = 20, t = 60, b = 80) ## b=80 to add more space
       )
     
   })
