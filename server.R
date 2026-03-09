@@ -8,7 +8,7 @@ server <- function(input, output, session) {
   # Label dictionary to naming stations
   station_labels <- c(
     "tb_estacao_1b" = "Merajuba/Mocajuba, PA",
-    "tab_estacao_3" = "Favela da Maré, RJ"
+    "tb_estacao_3" = "Favela da Maré, RJ"
   )
 
   # Label dictionary to naming sensors (climate variables) on dropdown menu
@@ -91,13 +91,14 @@ server <- function(input, output, session) {
 
   # DB CONNECTION (via Postgres) -----------------------------
 
+  source("credentials.R")
   con <- DBI::dbConnect(
     RPostgres::Postgres(),
     dbname = "observatorio",
     host = "psql.icict.fiocruz.br",
     port = 5432,
-    user = Sys.getenv("weather_user"),
-    password = Sys.getenv("weather_password")
+    user = user,
+    password = password
   )
 
   # Postgres schema prefix to tables
@@ -109,15 +110,8 @@ server <- function(input, output, session) {
 
   # INPUT PIPELINE -----------------------------------------------------
 
-  # Detect available stations (tables)
-  station_names <- DBI::dbGetQuery(
-    con,
-    paste0(
-      "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = '",
-      schema,
-      "'"
-    )
-  )$table_name ## List ALL available stations
+  # Available stations (tables)
+  station_names <- c("tb_estacao_1b", "tb_estacao_3")
 
   station_choices <- setNames(
     station_names,
@@ -293,6 +287,8 @@ server <- function(input, output, session) {
         sensor_sql,
         ")",
         " AND time = (SELECT MAX(time) FROM ",
+        schema,
+        ".",
         input$station,
         ")" ## Finds the latest timestamp in the entire table.
       )
