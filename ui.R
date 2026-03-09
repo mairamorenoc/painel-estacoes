@@ -2,7 +2,7 @@
 library(shiny)
 library(bslib) ## dashboard UI
 library(DBI) ## R Database Interface
-library(duckdb) ## Embedded database - optimized for data analysis (like SQLite but better)
+# library(duckdb) ## Embedded database - optimized for data analysis (like SQLite but better)
 library(RPostgres)
 library(dplyr) ## df manipulation
 library(lubridate) ## time manipulation
