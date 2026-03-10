@@ -110,6 +110,7 @@ server <- function(input, output, session) {
   # Detect available stations (tables) 
   station_names <- DBI::dbListTables(con) ## List ALL available stations
   
+  # Get station naming from labels dictionary
   station_choices <- setNames(
     station_names,
     sapply(station_names, function(id) {
@@ -119,7 +120,7 @@ server <- function(input, output, session) {
         paste("Estação", id)
       }
     })
-  )
+  ) ## for each id, if id is in station names dictionary, use the defined name, otherwise, show "Estacao" and id number
   
   
   # Update and populate dropdown menu with the available retrieved stations 
@@ -128,7 +129,7 @@ server <- function(input, output, session) {
     "station",
     choices  = station_choices, ## adds listed and unlisted stations to the dropdown  
     selected = station_names[1] ## choose the fisrt table as default one
-  ) ## OBS. Sem diccionario para nomes de estacoes por enquanto!
+  ) 
   
   
   # Input event-driven reactive logic for DATE calendar menu ------------
@@ -244,13 +245,20 @@ server <- function(input, output, session) {
     end_time   <- start_time + lubridate::days(1) ## Takes everything btw 00:00 to 00:00 of the selected day
     
     # "Lazy" DB reference to fetch daily data  
-    dplyr::tbl(con, input$station) |>
+    df <- dplyr::tbl(con, input$station) |>
       dplyr::filter(
         time >= start_time,
         time < end_time
       ) |>
       dplyr::select(sensor, time, value) |> ## Keep sensor, time and value cols
+      dplyr::arrange(sensor, time) |> ## arrange rows by time, so no zig-zag plot pattern
       dplyr::collect() ## execute the SQL query
+    
+    df$time <- df$time - lubridate::hours(3) ## Convert UTC timezone to Brasilia time-zone by substracting 3 hours
+    
+    ## OBS. Se nao funcionar metodo manual, tentar: df$time <- lubridate::with_tz(df$time, "America/Sao_Paulo")
+    
+    df
   })
   
   
@@ -265,7 +273,7 @@ server <- function(input, output, session) {
     sensor_ids <- c(8, 23, 35, 36, 347) ## Predefined key indicators sensors
     sensor_sql <- paste(sensor_ids, collapse = ", ") ## Take all sensor IDs and combine them into one comma-separated string → ideal for SQL query
     
-    DBI::dbGetQuery(
+    df <- DBI::dbGetQuery(
       con,
       paste0(
         "SELECT sensor, time, value FROM ", input$station,
@@ -273,6 +281,11 @@ server <- function(input, output, session) {
         " AND time = (SELECT MAX(time) FROM ", input$station, ")" ## Finds the latest timestamp in the entire table.
       )
     )
+    
+    df$time <- df$time - lubridate::hours(3) ## UTC to brasilia time-zone
+    
+    df
+    
   })
   
   # Function to get each KPI sensor data
@@ -343,7 +356,7 @@ server <- function(input, output, session) {
   formatted_time <- reactive({
     df <- latest_data()
     if (nrow(df) == 0) return(NULL)
-    format(df$time[1], "%Y-%m-%d %H:%M")
+    format(df$time[1], "%d-%m-%Y %H:%M") ## Brazilian time format
   })
   
   # Temperature

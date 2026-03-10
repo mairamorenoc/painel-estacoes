@@ -335,7 +335,9 @@ ui <- bslib::page_sidebar(
         dateInput(
           inputId = "selected_date",
           label = "Data", 
-          value = NULL
+          value = NULL,
+          format = "dd-mm-yyyy",
+          language = "pt"
         ),
         # Sensor (climate variables) selector dropdown
         selectInput(
