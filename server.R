@@ -338,7 +338,7 @@ server <- function(input, output, session) {
     
     meta_st$text ## Selects text attribute for rendering
     
-  })
+  }) ## OBS. Make this reactive later
   
   # Plot station location map
   output$station_map <- renderLeaflet({

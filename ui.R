@@ -196,7 +196,7 @@ ui <- bslib::page_sidebar(
         tags$small(textOutput("station_info")), ## Render station info text dynamically
         tags$div(
           style = "display:flex; flex-direction:column; gap:.5rem;",
-          leafletOutput("station_map", height = 200)
+          leafletOutput("station_map", height = 200) ## Render station map dynamically
         )
       )
     ),
