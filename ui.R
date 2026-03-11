@@ -6,6 +6,7 @@ library(duckdb) ## Embedded database - optimized for data analysis (like SQLite 
 library(dplyr) ## df manipulation
 library(lubridate) ## time manipulation
 library(plotly) ## interactive charts
+library(leaflet) ## interactive maps
 library(fontawesome) ## i tooltip icon
 
 
@@ -30,6 +31,11 @@ ui <- bslib::page_sidebar(
     tags$span(
       "Painel de Estações Meteorológicas",
       style = "font-weight:600; font-size:1.1rem;"
+    ),
+    bslib::tooltip(
+      tags$span(icon("info-circle")),
+      "Este painel interativo foi desenvolvido para a visualização e o monitoramento de dados climáticos provenientes de estações meteorológicas localizadas no Brasil.",
+      placement = "top"
     )
   ),
   
@@ -50,6 +56,15 @@ ui <- bslib::page_sidebar(
   ## @media rules for responsive design - DON't FORGET to always add tem!
   tags$head(
     tags$style(HTML("
+      /* CSS for station input */
+      #station + .selectize-control .selectize-input {
+      font-size: 0.85rem;
+      }
+
+      #station + .selectize-control .selectize-dropdown {
+        font-size: 0.85rem;
+      }
+      
       /* CSS for cards */
       .card {
         border-radius: 16px;
@@ -159,15 +174,31 @@ ui <- bslib::page_sidebar(
   # SIDEBAR --------------------
   sidebar = bslib::sidebar(
     
+    # Station dropdown input selector
+    bslib::card(
+      bslib::card_header("Estação/Local"),
+      # Stations (locations) selector dropdown
+      selectInput(
+        inputId = "station",
+        label = NULL,
+        choices = NULL ## keep empty bc this will populate dinamycaly
+      )
+      
+    ),
+    
     # Info section ----------------
     bslib::card(
-      bslib::card_header("Sobre o Painel"),
-      tags$div(
-        style = "display:flex; flex-direction:column; gap:.5rem;",
-        tags$small(
-          "Este painel interativo foi desenvolvido para a visualização e o monitoramento de dados climáticos provenientes de estações meteorológicas localizadas no Brasil."
+      full_screen = TRUE,
+      # Card header
+      bslib::card_header("Sobre a Estação"),
+      # Card body
+      bslib::card_body(
+        tags$small(textOutput("station_info")), ## Render station info text dynamically
+        tags$div(
+          style = "display:flex; flex-direction:column; gap:.5rem;",
+          leafletOutput("station_map", height = 200)
         )
-      ) 
+      )
     ),
     
     # Contact section ----------------
@@ -324,13 +355,7 @@ ui <- bslib::page_sidebar(
       
       # Small control bar
       bslib::layout_columns(
-        col_widths = c(4, 4, 4), ## 3 equal columns (12 col layout)
-        # Stations (locations) selector dropdown
-        selectInput(
-          inputId = "station",
-          label = "Estação/local",
-          choices = NULL ## keep empty bc this will populate dinamycaly
-        ),
+        col_widths = c(4, 4, 4), ## 3 equal columns (12 col layout) - use remaining col for download button
         # Calendar selector dropdown 
         dateInput(
           inputId = "selected_date",

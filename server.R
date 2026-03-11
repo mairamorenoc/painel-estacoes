@@ -88,6 +88,21 @@ server <- function(input, output, session) {
     UV = list(ids=c("19"), unit="uv")
   )
   
+  # Station metadata for sidebar contextual info
+  station_meta <- list(
+    "tb_estacao_1b" = list(
+      text = "Localizada em  Merajuba/Mocajuba, Pará.", ## OBS. atualizar
+      lat = -2.50974,
+      lon = -49.46684
+    ),
+    "tab_estacao_3" = list(
+      text = "Localizada na Casa das Mulheres da Redes Maré.",
+      lat = -22.85172,
+      lon = -43.24457
+    )
+    
+  )
+  
   
   
   # DB CONNECTION (via DuckDB) -----------------------------
@@ -310,6 +325,36 @@ server <- function(input, output, session) {
     }
     
   })
+  
+  
+  # Render Station info card ---------------------------
+  
+  # Render station info text
+  output$station_info <- renderText({
+    
+    req(input$station)
+    
+    meta_st <- station_meta[[input$station]] ## Retrieves metadata of selected station from object list 
+    
+    meta_st$text ## Selects text attribute for rendering
+    
+  })
+  
+  # Plot station location map
+  output$station_map <- renderLeaflet({
+    
+    req(input$station)
+    
+    meta_map <- station_meta[[input$station]]
+    
+    leaflet() %>%
+      addTiles %>%
+      addMarkers(
+        lng = meta_map$lon,
+        lat = meta_map$lat
+      )
+  })
+  
   
   # Render KPI charts ----------------------------------
   
