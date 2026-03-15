@@ -118,7 +118,7 @@ server <- function(input, output, session) {
   )
 
   # Postgres schema prefix to tables
-  schema <- "estacoes" ## "folder" where station tables lives on the Postgres DB
+  schema <- "estacoes"
 
   session$onSessionEnded(function() {
     DBI::dbDisconnect(con) ## Close DB conn on session ends
@@ -127,7 +127,7 @@ server <- function(input, output, session) {
   # INPUT PIPELINE -----------------------------------------------------
 
   # Available stations (tables)
-  station_names <- c("tb_estacao_1b", "tb_estacao_3") ## OBS. estacoes devem ser adicionadas manualmente
+  station_names <- c("tb_estacao_1b", "tb_estacao_3")
 
   station_choices <- setNames(
     station_names,

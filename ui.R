@@ -1,8 +1,9 @@
 # Libraries
-library(shiny) 
+library(shiny)
 library(bslib) ## dashboard UI
 library(DBI) ## R Database Interface
 # library(duckdb) ## Embedded database - optimized for data analysis (like SQLite but better)
+library(RPostgres)
 library(dplyr) ## df manipulation
 library(lubridate) ## time manipulation
 library(plotly) ## interactive charts
@@ -38,18 +39,18 @@ ui <- bslib::page_sidebar(
       placement = "top"
     )
   ),
-  
+
   # ui theme
   theme = bslib::bs_theme(
-    version = 5,  ## boostrap v5
+    version = 5, ## boostrap v5
     bootswatch = "flatly", ## boostrap theme
-    base_font =  bslib::font_google("Inter"), ## Google font
-    
+    base_font = bslib::font_google("Inter"), ## Google font
+
     # Custom header colors
-    "navbar-bg" = "#bbd0c9",   
+    "navbar-bg" = "#bbd0c9",
     "navbar-fg" = "black"
-  ), 
-  
+  ),
+
   # CSS for ui style
   ## tags$head to create <head> HTML tag
   ## tags$style to create <style> HTML tag -> uses HTML CSS class (.card, .kpi-grid, etc.)
@@ -168,9 +169,10 @@ ui <- bslib::page_sidebar(
       transform: scale(1.2);
       color: #0d6efd;
     }
-    ")) 
-  ), 
-  
+    "
+    ))
+  ),
+
   # SIDEBAR --------------------
   sidebar = bslib::sidebar(
     
@@ -200,7 +202,7 @@ ui <- bslib::page_sidebar(
         )
       )
     ),
-    
+
     # Contact section ----------------
     bslib::card(
       bslib::card_header("Contato"),
@@ -218,18 +220,18 @@ ui <- bslib::page_sidebar(
         )
       )
     )
-  ),  
-  
+  ),
+
   # MAIN --------------------
   # Layout grid
   bslib::layout_column_wrap(
     width = 1, ## each KPI card item takes 1 grid unit
     heights_equal = "row", ## more card height
-    
+
     # KPI DIV (for 4 cards) ---------------
     tags$div(
       class = "kpi-grid", ## CSS class defined previously
-      
+
       # Card 1 - Temperature
       # Main card
       bslib::card(
@@ -245,17 +247,17 @@ ui <- bslib::page_sidebar(
               tags$span(icon("info-circle")),
               "Dados mais recentes conforme disponibilidade no banco de dados.",
               placement = "top"
-            ) 
-          ) 
-        ), 
-        
+            )
+          )
+        ),
+
         # Body card
         bslib::card_body(
           uiOutput("temp_value"),
-          tags$div(class = "kpi-sub", uiOutput("temp_sub")) 
-        ) 
-      ), 
-      
+          tags$div(class = "kpi-sub", uiOutput("temp_sub"))
+        )
+      ),
+
       # Card 2 - Rain
       # Main card
       bslib::card(
@@ -271,17 +273,17 @@ ui <- bslib::page_sidebar(
               tags$span(icon("info-circle")),
               "Dados mais recentes conforme disponibilidade no banco de dados.",
               placement = "top"
-            ) 
-          ) 
-        ), 
-        
+            )
+          )
+        ),
+
         # Body card
         bslib::card_body(
           uiOutput("rain_value"),
           tags$div(class = "kpi-sub", uiOutput("rain_sub"))
-        ) 
-      ), 
-      
+        )
+      ),
+
       # Card 3 - Pressure
       # Main card
       bslib::card(
@@ -297,17 +299,17 @@ ui <- bslib::page_sidebar(
               tags$span(icon("info-circle")),
               "Dados mais recentes conforme disponibilidade no banco de dados.",
               placement = "top"
-            ) 
-          ) 
-        ), 
-        
+            )
+          )
+        ),
+
         # Body card
         bslib::card_body(
           uiOutput("pressure_value"),
           tags$div(class = "kpi-sub", uiOutput("pressure_sub"))
-        ) 
-      ), 
-      
+        )
+      ),
+
       # Card 4 - Wind
       # Main card
       bslib::card(
@@ -323,17 +325,17 @@ ui <- bslib::page_sidebar(
               tags$span(icon("info-circle")),
               "Dados mais recentes conforme disponibilidade no banco de dados.",
               placement = "top"
-            ) 
-          ) 
-        ), 
-        
+            )
+          )
+        ),
+
         bslib::card_body(
           uiOutput("wind_value"),
           tags$div(class = "kpi-sub", uiOutput("wind_sub"))
-        ) 
-      ) 
-    ), 
-    
+        )
+      )
+    ),
+
     # Main plot card ----------------
     bslib::card(
       full_screen = TRUE, ## adds expand button in the top-right corner
@@ -350,9 +352,8 @@ ui <- bslib::page_sidebar(
             placement = "top"
           )
         )
-        
       ),
-      
+
       # Small control bar
       bslib::layout_columns(
         col_widths = c(4, 4, 4), ## 3 equal columns (12 col layout) - use remaining col for download button
@@ -370,13 +371,13 @@ ui <- bslib::page_sidebar(
           label = "Indicador",
           choices = NULL
         )
-      ), 
-      
+      ),
+
       # Add spacing
       br(),
-      
+
       # Render plot
       plotlyOutput("sensor_plot", height = "600px")
-    ) 
-  ) 
+    )
+  )
 )
