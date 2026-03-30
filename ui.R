@@ -3,6 +3,7 @@ library(shiny)
 library(bslib) ## dashboard UI
 library(DBI) ## R Database Interface
 # library(duckdb) ## Embedded database - optimized for data analysis (like SQLite but better)
+library(RPostgres)
 library(dplyr) ## df manipulation
 library(lubridate) ## time manipulation
 library(plotly) ## interactive charts
@@ -59,10 +60,26 @@ ui <- bslib::page_sidebar(
       /* CSS for station input */
       #station + .selectize-control .selectize-input {
       font-size: 0.85rem;
+      display: flex; /* flexivel layout */ 
+      align-items: center; 
+      justify-content: space-between; 
       }
 
+    #station + .selectize-control .selectize-input .item {
+      flex: 1; /* text fills all input box - fix blank space at the end */
+      }
+
+      /* CSS for station dropdown style */
       #station + .selectize-control .selectize-dropdown {
         font-size: 0.85rem;
+      }
+      
+      /* CSS for station input arrow style */
+      #station + .selectize-control .selectize-input::after {
+      right: 6px !important;
+      margin: 0 !important;
+      top: 12px;
+      transform: none;
       }
       
       /* CSS for cards */
@@ -70,6 +87,10 @@ ui <- bslib::page_sidebar(
         border-radius: 16px;
         box-shadow: 0 8px 24px rgba(0,0,0,.06);
         border: 1px solid rgba(0,0,0,.06);
+      }
+      
+      .sidebar-card .card-body {
+      padding: 0.75rem;
       }
 
       /* Sidebar spacing */
