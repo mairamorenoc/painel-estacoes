@@ -57,7 +57,7 @@ ui <- bslib::page_sidebar(
   ## @media rules for responsive design - DON't FORGET to always add tem!
   tags$head(
     tags$style(HTML("
-      /* CSS for station input */
+      /* Custom CSS for station input */
       #station + .selectize-control .selectize-input {
       font-size: 0.85rem;
       display: flex; /* flexivel layout */ 
