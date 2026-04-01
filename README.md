@@ -4,7 +4,7 @@ Dashboard web para visualização e monitoramento de dados climáticos provenien
 
 ---
 
-## Estrutura do Projeto
+## 📁 Estrutura do Projeto
 
 ```
 painel_estacoes/
@@ -17,25 +17,24 @@ painel_estacoes/
 ```
 ---
 
-## Ferramentas 
+## ⚙️ Ferramentas Utilizadas
 
 - **R** ≥ 4.2
 - **RStudio** 
 - Principais pacotes R:
   - `shiny`, `bslib`, `DBI`
   - `plotly`, `leaflet`, `RPostgres`
-  - `dplyr`, `duckdb`
-  - `lubridate`, `fontawesome`
+  - `dplyr`, `lubridate`, `fontawesome`
 
 ---
 
-## Acesso ao Dashboard
+## 🌐 Acesso ao Dashboard
 O Dashboard está disponível online, no seguinte link: 
 [https://shiny.icict.fiocruz.br/painel_estacoes/](https://shiny.icict.fiocruz.br/painel_estacoes/)
 
 ---
 
-## Funcionalidades do Dashboard
+## 📊 Funcionalidades do Dashboard
 
 | Componente | Descrição |
 |-----|-----------|
@@ -46,7 +45,7 @@ O Dashboard está disponível online, no seguinte link:
 
 ---
 
-## Dados
+## 🔄 Fluxo de Dados
 
 Os dados são coletados por sensores em estações meteorológicas distribuídas pelo Brasil, armazenados em banco de dados do Icict/Fiocruz e disponibilizados ao dashboard por meio de uma API.
 
@@ -55,7 +54,7 @@ Os dados são coletados por sensores em estações meteorológicas distribuídas
 
 ---
 
-## Arquitetura
+## 🧱 Arquitetura do Projeto
 
 O Dashboard é composto por duas partes principais:
 
@@ -68,7 +67,7 @@ O Dashboard é composto por duas partes principais:
 
 ---
 
-## Equipe de Desenvolvimento
+## 👨‍💻 Equipe de Desenvolvimento
 
 ### Dashboard (Frontend - R Shiny)
 - **Maira Alejandra Moreno**  
@@ -78,11 +77,14 @@ O Dashboard é composto por duas partes principais:
 - **Raphael Saldanha**  
   [![GitHub](https://img.shields.io/badge/GitHub-Perfil-181717?style=for-the-badge&logo=github)](https://github.com/rfsaldanha)
 
+### Implantação e configuração das estações meteorológicas
+- **Diego Ricardo Xavier**  
+  [![GitHub](https://img.shields.io/badge/GitHub-Perfil-181717?style=for-the-badge&logo=github)](https://github.com/Diegoricardox)
+
 ---
 
-## Contato
+## 📬 Contato
 
 Observatório de Clima e Saúde — ICICT/Fiocruz  
-[https://climaesaude.icict.fiocruz.br](https://climaesaude.icict.fiocruz.br)
-[![Email](https://img.shields.io/badge/Email-Contato-D14836?style=for-the-badge&logo=gmail&logoColor=white)](mailto:
-obs.climaesaude@fiocruz.br)
+- [https://climaesaude.icict.fiocruz.br](https://climaesaude.icict.fiocruz.br)
+- [obs.climaesaude@fiocruz.br](mailto:obs.climaesaude@fiocruz.br)
