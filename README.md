@@ -1,6 +1,10 @@
 # Painel de Estações Meteorológicas | OCS
 
-Dashboard web para visualização e monitoramento de dados climáticos provenientes de sensores meteorológicos instalados em sítios sentinela no Brasil, desenvolvido pelo **Observatório de Clima e Saúde — ICICT/Fiocruz**.
+Dashboard web interativo para visualização e monitoramento de dados climáticos provenientes de sensores meteorológicos instalados em sítios sentinela no Brasil, desenvolvido pelo **Observatório de Clima e Saúde — ICICT/Fiocruz**.
+
+<p align="center">
+  <img src="docs/images/painel-image.png" width="900">
+</p>
 
 ---
 
