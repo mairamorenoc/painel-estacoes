@@ -9,7 +9,7 @@ server <- function(input, output, session) {
   station_labels <- c(
     "tb_estacao_1b" = "Merajuba/Mocajuba, PA",
     "tb_estacao_3" = "Complexo da Maré, RJ",
-    "tab_estacao_4" = "Complexo da Maré, RJ - Qualidade Ar" ## OBS é tab_estacao_4 ou tb_estacao_4?
+    "tb_estacao_4" = "Complexo da Maré, RJ - Qualidade Ar" ## OBS é tab_estacao_4 ou tb_estacao_4?
   )
   
   # Default sensors----------------------------------
@@ -137,7 +137,7 @@ server <- function(input, output, session) {
       lat = -22.85172,
       lon = -43.24457
     ),
-    "tab_estacao_4" = list(
+    "tb_estacao_4" = list(
       text = "Localizada na Casa das Mulheres da Redes Maré.",
       lat = -22.85172,
       lon = -43.24457
@@ -174,7 +174,7 @@ server <- function(input, output, session) {
   # INPUT PIPELINE -----------------------------------------------------
 
   # Available stations (tables)
-  station_names <- c("tb_estacao_1b", "tb_estacao_3", "tab_estacao_4") ## OBS. Verificar se é "tab_estacao_4"
+  station_names <- c("tb_estacao_1b", "tb_estacao_3", "tb_estacao_4") ## OBS. Verificar nome estacao 4
 
   station_choices <- setNames(
     station_names,
@@ -200,7 +200,7 @@ server <- function(input, output, session) {
     
     req(input$station)
     
-    if (input$station == "tab_estacao_4") {
+    if (input$station == "tb_estacao_4") {
       active_labels <- airQuality_labels
       active_categories <- airQuality_cats
       active_config <- airQuality_config
@@ -273,7 +273,7 @@ server <- function(input, output, session) {
       # Remove unwanted sensors for SPECIFIC stations 
       excluded_by_station <- list(
         "tb_estacao_3" = c("48", "49"),
-        "tab_estacao_4" = c("23")
+        "tb_estacao_4" = c("23") ## Pressure sensor - already in main station
       )
       
       # Rule to handle NULL results
@@ -379,31 +379,49 @@ server <- function(input, output, session) {
   })
 
   # Data pipeline to ploting KPI cards -------------------------------------------
-
+  
+  # KPI station schema 
+  kpi_station_map <- c(
+    "tb_estacao_4" = "tb_estacao_3"
+  ) ## OBS. Mapping vectors são melhores se precisar acrescentar mais uma estação com essa regra
+  
+  # Rule for choosing which station will be used on KPI Cards
+  kpi_station <- reactive({
+    
+    req(input$station)
+    
+    if (input$station %in% names(kpi_station_map)) {
+      kpi_station_map[[input$station]]
+    } else {
+      input$station
+    }
+    
+  })
+  
   # Fetch latest hour from KPI specific sensors
   latest_data <- reactive({
-    req(input$station)
+    req(kpi_station()) ## this will use reactive rule instead of input$station
 
     sensor_ids <- c(8, 23, 35, 36, 347) ## Predefined key indicators sensors
     sensor_sql <- paste(sensor_ids, collapse = ", ") ## Take all sensor IDs and combine them into one comma-separated string → ideal for SQL query
-
+    
+    # UPDATED DB query
     df <- DBI::dbGetQuery(
       con,
       paste0(
-        "SELECT sensor, time, value FROM ",
-        schema,
-        ".",
-        input$station,
-        " WHERE sensor IN (",
-        sensor_sql,
-        ")",
-        " AND time = (SELECT MAX(time) FROM ",
-        schema,
-        ".",
-        input$station,
-        ")" ## Finds the latest timestamp in the entire table.
+        "SELECT t.sensor, t.time, t.value
+       FROM ", schema, ".", kpi_station(), " t
+       INNER JOIN (
+         SELECT sensor, MAX(time) AS max_time
+         FROM ", schema, ".", kpi_station(), "
+         WHERE sensor IN (", sensor_sql, ")
+         GROUP BY sensor
+       ) last
+       ON t.sensor = last.sensor
+       AND t.time = last.max_time
+       WHERE t.sensor IN (", sensor_sql, ")"
       )
-    )
+    ) ## Now this returns the last available value for each KPI sensor and not just the the last available according to time stamp
     
     df$time <- df$time - lubridate::hours(3) ## UTC to brasilia time-zone
     
@@ -414,8 +432,14 @@ server <- function(input, output, session) {
   # Function to get each KPI sensor data
   get_sensor_value <- function(placeholder_id) {
     df <- latest_data()
-    df$value[df$sensor == placeholder_id][1] ## OBS. Rever se manter [1]
-  }
+    vals <- df$value[df$sensor == placeholder_id]
+    
+    if (length(vals) == 0) {
+      return(NA_real_)
+    } ## Adds defensive programming expression
+    
+    vals[1]
+  } 
 
   # PLOTING DATA-----------------------------------------
 
