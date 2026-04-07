@@ -1,5 +1,9 @@
 # Painel de Estações Meteorológicas | OCS
 
+![R](https://img.shields.io/badge/R-Data%20Science-blue)
+<img src="https://img.shields.io/badge/R-Shiny-blue"/>
+<img src="https://img.shields.io/badge/Leaflet-Maps-green"/>
+
 Dashboard web interativo para visualização e monitoramento de dados climáticos provenientes de sensores meteorológicos instalados em sítios sentinela no Brasil, desenvolvido pelo **Observatório de Clima e Saúde — ICICT/Fiocruz**.
 
 <p align="center">
@@ -87,7 +91,7 @@ O Dashboard é composto por duas partes principais:
 
 ---
 
-## 📬 Contato
+## 📩 Contato
 
 Observatório de Clima e Saúde — ICICT/Fiocruz  
 - [https://climaesaude.icict.fiocruz.br](https://climaesaude.icict.fiocruz.br)

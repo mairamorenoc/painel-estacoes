@@ -8,8 +8,11 @@ server <- function(input, output, session) {
   # Label dictionary to naming stations
   station_labels <- c(
     "tb_estacao_1b" = "Merajuba/Mocajuba, PA",
-    "tb_estacao_3" = "Complexo da Maré, RJ" ## OBS. vamos usar favela ou complexo?
+    "tb_estacao_3" = "Complexo da Maré, RJ",
+    "tab_estacao_4" = "Complexo da Maré, RJ - Qualidade Ar" ## OBS é tab_estacao_4 ou tb_estacao_4?
   )
+  
+  # Default sensors----------------------------------
 
   # Label dictionary to naming sensors (climate variables) on dropdown menu
   sensor_labels <- c(
@@ -82,6 +85,45 @@ server <- function(input, output, session) {
     UV = list(ids = c("19"), unit = "uv")
   )
   
+  # Air Quality sensors---------------------
+  
+  # Label dictionary for air quality sensors
+  airQuality_labels <- c(
+    "70"   = "Ozono (O3)",
+    "71"  = "Material Particulado 2.5 (PM2.5)",
+    "72"  = "Material Particulado 10 (PM10)",
+    "73"  = "Dióxido de Enxofre (SO2)",
+    "74"  = "Dióxido de Nitrogênio (NO2)",
+    "75"  = "Monóxido de Carbono (CO)"
+  )
+  
+  # Air quality sensors categories list schema (for dropdown, plots and so on)
+  airQuality_cats <- list(
+    "Material Particulado (PM)" = list(ids=c("71", "72"), unit="µg/m³"),
+    "Ozono (O3)" = list(ids=c("70"), unit="ppm"),
+    "Dióxido de Enxofre (SO2)" = list(ids=c("73"), unit="ppm"),
+    "Dióxido de Nitrogênio (NO2)" = list(ids=c("74"), unit="ppm"),
+    "Monóxido de Carbono (CO)" = list(ids=c("75"), unit="ppm")
+  )
+  
+  # Label dictionary to customize air quality sensor plottly plots (color, chart type)
+  airQuality_config <- list(
+    
+    # Gases
+    "70"  = list(type = "scatter", mode = "lines", color = "#800080"), ## O3
+    "73" = list(type = "scatter", mode = "lines", color = "#00009c"), ## SO2
+    "74" = list(type = "scatter", mode = "lines", color = "#457b9d"), ## NO2
+    "75" = list(type = "scatter", mode = "lines", color = "#264653"), ## CO
+    
+    # Particulate Matter
+    "71" = list(type = "scatter", mode = "lines", color = "#e5e619"), ## PM2.5
+    "72" = list(type = "scatter", mode = "lines", color = "#228b22"), ## PM10
+    
+    # Missing codes
+    "default" = list(type = "scatter", mode = "lines", color = "#333333") # see and plot those "unknown" sensors codes 
+  )
+  
+  # Contextual Metadata ------------------------
   
   # Station metadata for sidebar contextual info
   station_meta <- list(
@@ -94,7 +136,12 @@ server <- function(input, output, session) {
       text = "Localizada na Casa das Mulheres da Redes Maré.", 
       lat = -22.85172,
       lon = -43.24457
-    )
+    ),
+    "tab_estacao_4" = list(
+      text = "Localizada na Casa das Mulheres da Redes Maré.",
+      lat = -22.85172,
+      lon = -43.24457
+    ) ## For new ar quality station - check the table name
   )
   
 
@@ -127,7 +174,7 @@ server <- function(input, output, session) {
   # INPUT PIPELINE -----------------------------------------------------
 
   # Available stations (tables)
-  station_names <- c("tb_estacao_1b", "tb_estacao_3")
+  station_names <- c("tb_estacao_1b", "tb_estacao_3", "tab_estacao_4") ## OBS. Verificar se é "tab_estacao_4"
 
   station_choices <- setNames(
     station_names,
@@ -147,6 +194,29 @@ server <- function(input, output, session) {
     choices = station_choices, ## adds listed and unlisted stations to the dropdown
     selected = station_names[1] ## choose the fisrt table as default one
   ) 
+  
+  # Reactive expression to choose active sensor metadata according to selected station 
+  sensor_meta <- reactive ({
+    
+    req(input$station)
+    
+    if (input$station == "tab_estacao_4") {
+      active_labels <- airQuality_labels
+      active_categories <- airQuality_cats
+      active_config <- airQuality_config
+    } else {
+      active_labels <- sensor_labels
+      active_categories <- categories
+      active_config <- sensor_config
+    }
+    
+    list(
+      labels = active_labels,
+      categories = active_categories,
+      config = active_config
+    )
+    
+  })
 
   # Input event-driven reactive logic for DATE calendar menu ------------
   observeEvent(
@@ -197,27 +267,45 @@ server <- function(input, output, session) {
       # Convert sensor numeric values as char
       sensor_ids <- as.character(sensors_df$sensor) ## OBS. Estava dando errado porque nos labels armazenei esses dados como string!
 
-      # Remove unwanted sensors (such stations connectivity info)
-      sensor_ids <- sensor_ids[!sensor_ids %in% c("1", "25", "26")] ## Wifi, Bluetooth and Mobile data
+      # Remove unwanted sensors (such stations connectivity info) for ALL stations
+      excluded_global <- c("1", "25", "26") ## Wifi, Bluetooth and Mobile data
+      
+      # Remove unwanted sensors for SPECIFIC stations 
+      excluded_by_station <- list(
+        "tb_estacao_3" = c("48", "49"),
+        "tab_estacao_4" = c("23")
+      )
+      
+      # Rule to handle NULL results
+      station_excluded <- excluded_by_station[[input$station]]
+      if (is.null(station_excluded)) {
+        station_excluded <-character(0) ## empty vector (character(0)) to avoid NULL retrieve
+      }
+      
+      # Remove ALL unwanted sensors (global and by station)
+      sensor_ids <- sensor_ids[!sensor_ids %in% c(excluded_global, station_excluded)] ## Keeps only sensors that are not in the excluded list categories
+      
+      # Get active sensor metadata from reactive expression
+      meta <- sensor_meta()
 
-      # Get sensors ids
-      categorized_ids <- unique(unlist(lapply(categories, function(i) i$ids))) ## loops over each object in the list to ONLY get ids
+      # Get sensors ids from active sensors
+      categorized_ids <- unique(unlist(lapply(meta$categories, function(i) i$ids))) ## loops over each object in the list to ONLY get ids
 
       # Get all unlisted sensors (missing sensors)
       standalone_ids <- sensor_ids[!sensor_ids %in% categorized_ids] ## tem sensor codes que não estão na lista que o rapha passou!
 
       # Set category label choices for sensor categories dropdown menu
       category_choices <- setNames(
-        paste0("cat_", names(categories)), ## add "cat_" prefix to categories names to easily detect categories → startsWith(selected, "cat_")
-        names(categories)
-      ) ## OBS. Rever uso de prefix → implementacao melhor?
+        paste0("cat_", names(meta$categories)), ## add "cat_" prefix to categories names to easily detect categories → startsWith(selected, "cat_")
+        names(meta$categories)
+      ) 
 
       # Set label choices for missing sensors in the sensor dropdown menu
       standalone_choices <- setNames(
         standalone_ids,
         sapply(standalone_ids, function(id) {
-          if (id %in% names(sensor_labels)) {
-            sensor_labels[id]
+          if (id %in% names(meta$labels)) {
+            meta$labels[id]
           } else {
             paste("Sensor", id)
           }
@@ -463,6 +551,9 @@ server <- function(input, output, session) {
       dplyr::distinct(sensor, time, .keep_all = TRUE) ## Keep only 1 row for each sensor and time
 
     req(nrow(df_all) > 0) ## Run code only if there any rows on df
+    
+    # Get active sensor metadata from reactive expression
+    meta <- sensor_meta()
 
     # Get selected sensor
     selected <- input$sensor
@@ -473,8 +564,8 @@ server <- function(input, output, session) {
       category_name <- sub("cat_", "", selected) ## remove category prefix
 
       # GEt sensors and units from the category
-      sensor_ids <- categories[[category_name]]$ids ## take categories names
-      unit_label <- categories[[category_name]]$unit ## take categories units
+      sensor_ids <- meta$categories[[category_name]]$ids ## take categories names
+      unit_label <- meta$categories[[category_name]]$unit ## take categories units
 
       # From all sensor data, picks ONLY the ones that are in category list and makes them integer
       df <- df_all |>
@@ -490,8 +581,8 @@ server <- function(input, output, session) {
         dplyr::filter(sensor == as.integer(selected))
 
       # Define title dynamically using sensor naming labels dictionary
-      plot_title <- if (selected %in% names(sensor_labels)) {
-        sensor_labels[selected] ## for listed sensors
+      plot_title <- if (selected %in% names(meta$labels)) {
+        meta$labels[selected] ## for listed sensors
       } else {
         paste("Sensor", selected) ## for missing sensors
       }
@@ -506,14 +597,14 @@ server <- function(input, output, session) {
     # Loop over sensors to get plotting config and plot charts
     for (sid in unique(df$sensor)) {
       sid_char <- as.character(sid) ## match string format of dictionary labels
-      config <- sensor_config[[sid_char]] ## get plot config from dictionary (sensor_config) - chart type, color, etc.
+      config <- meta$config[[sid_char]] ## get plot config from dictionary (sensor_config) - chart type, color, etc.
       if (is.null(config)) {
-        config <- sensor_config[["default"]]
+        config <- meta$config[["default"]]
       } ## use default plot config for missing/new sensors
 
       # Conditional logic for sensor naming
-      sensor_name <- if (sid_char %in% names(sensor_labels)) {
-        sensor_labels[sid_char] ## use label from dictionary (sensor_labels)
+      sensor_name <- if (sid_char %in% names(meta$labels)) {
+        meta$labels[sid_char] ## use label from dictionary (sensor_labels)
       } else {
         paste("Sensor", sid_char) ## use "Sensor"  as label
       }
