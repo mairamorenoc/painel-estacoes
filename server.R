@@ -89,7 +89,7 @@ server <- function(input, output, session) {
   
   # Label dictionary for air quality sensors
   airQuality_labels <- c(
-    "70"   = "Ozono (O3)",
+    "70"   = "Ozônio (O3)",
     "71"  = "Material Particulado 2.5 (PM2.5)",
     "72"  = "Material Particulado 10 (PM10)",
     "73"  = "Dióxido de Enxofre (SO2)",
@@ -100,7 +100,7 @@ server <- function(input, output, session) {
   # Air quality sensors categories list schema (for dropdown, plots and so on)
   airQuality_cats <- list(
     "Material Particulado (PM)" = list(ids=c("71", "72"), unit="µg/m³"),
-    "Ozono (O3)" = list(ids=c("70"), unit="ppm"),
+    "Ozônio (O3)" = list(ids=c("70"), unit="ppm"),
     "Dióxido de Enxofre (SO2)" = list(ids=c("73"), unit="ppm"),
     "Dióxido de Nitrogênio (NO2)" = list(ids=c("74"), unit="ppm"),
     "Monóxido de Carbono (CO)" = list(ids=c("75"), unit="ppm")

@@ -128,6 +128,24 @@ ui <- bslib::page_sidebar(
       .card-sub a:hover {
          text-decoration: underline;
       }
+      
+      /* Allow station dropdown to open outside the card */
+      .sidebar-card {
+        overflow: visible !important;
+      }
+
+      .sidebar-card .card-body {
+        overflow: visible !important;
+      }
+
+      /* Keep station dropdown above the sidebar card */
+      #station + .selectize-control {
+        z-index: 1000;
+      }
+
+      #station + .selectize-control .selectize-dropdown {
+        z-index: 9999 !important;
+      }
 
       /* KPI grid */
       .kpi-grid {
