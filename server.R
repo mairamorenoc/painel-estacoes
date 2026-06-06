@@ -200,7 +200,9 @@ server <- function(input, output, session) {
     
     req(input$station)
     
-    if (input$station == "tb_estacao_4") {
+    ## FIX 1/2: Remove cat. 34 from Mare St.
+    # Choose active metadata according to station
+    if (input$station == "tab_estacao_4") {
       active_labels <- airQuality_labels
       active_categories <- airQuality_cats
       active_config <- airQuality_config
@@ -288,16 +290,30 @@ server <- function(input, output, session) {
       # Get active sensor metadata from reactive expression
       meta <- sensor_meta()
 
-      # Get sensors ids from active sensors
-      categorized_ids <- unique(unlist(lapply(meta$categories, function(i) i$ids))) ## loops over each object in the list to ONLY get ids
-
-      # Get all unlisted sensors (missing sensors)
-      standalone_ids <- sensor_ids[!sensor_ids %in% categorized_ids] ## tem sensor codes que não estão na lista que o rapha passou!
-
+      ## FIX 2/2: Remove cat. 34 from Mare St.
+      # Keep only categories that still have at least one available sensor
+      available_categories <- Filter(
+        function(cat) {
+          any(cat$ids %in% sensor_ids)
+        },
+        meta$categories
+      )
+      
+      ## DEBUG
+      print(names(available_categories))
+      
+      # Get sensor ids from available categories
+      categorized_ids <- unique(
+        unlist(lapply(available_categories, function(i) i$ids))
+      )
+      
+      # Get all unlisted sensors
+      standalone_ids <- sensor_ids[!sensor_ids %in% categorized_ids]
+      
       # Set category label choices for sensor categories dropdown menu
       category_choices <- setNames(
-        paste0("cat_", names(meta$categories)), ## add "cat_" prefix to categories names to easily detect categories → startsWith(selected, "cat_")
-        names(meta$categories)
+        paste0("cat_", names(available_categories)),
+        names(available_categories)
       ) 
 
       # Set label choices for missing sensors in the sensor dropdown menu
