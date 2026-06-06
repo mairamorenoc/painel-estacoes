@@ -6,11 +6,35 @@ server <- function(input, output, session) {
   # LABEL LIST/DICTONARIES ----------------------
 
   # Label dictionary to naming stations
-  station_labels <- c(
+  station_labels <- c (
     "tb_estacao_1b" = "Merajuba/Mocajuba, PA",
-    "tb_estacao_3" = "Complexo da Maré, RJ",
-    "tb_estacao_4" = "Complexo da Maré, RJ - Qualidade Ar" ## OBS é tab_estacao_4 ou tb_estacao_4?
+    "mare" = "Complexo da Maré, RJ" # "unified" mare station label
   )
+  
+  # "Virtual" station map
+  # Since "mare" is not a real DB table. Here It represents two actual tables
+  station_table_map <- list(
+    "mare" = c("tb_estacao_3", "tb_estacao_4") ## OBS é tab_estacao_4 ou tb_estacao_4?
+  )
+  
+  # Exclusions moved outside observeEvent to make them Global
+  # Remove unwanted sensors for ALL stations
+  excluded_global <- c("1", "25", "26") ## Wifi, Bluetooth and Mobile data
+  
+  # Remove unwanted sensors for SPECIFIC real tables
+  excluded_by_table <- list(
+    "tb_estacao_3" = c("48", "49"),
+    "tb_estacao_4" = c("23") ## Pressure sensor - already in main station
+  )
+  
+  # Helper to get real DB table names from selected station
+  get_station_tables <- function(station_id) {
+    if (station_id %in% names(station_table_map)) {
+      station_table_map[[station_id]]
+    } else {
+      station_id
+    }
+  }
   
   # Default sensors----------------------------------
 
@@ -132,16 +156,11 @@ server <- function(input, output, session) {
       lat = -2.50974,
       lon = -49.46684
     ),
-    "tb_estacao_3" = list(
-      text = "Localizada na Casa das Mulheres da Redes Maré.", 
+    "mare" = list(
+      text = "Localizada na Casa das Mulheres da Maré.", 
       lat = -22.85172,
       lon = -43.24457
-    ),
-    "tb_estacao_4" = list(
-      text = "Localizada na Casa das Mulheres da Redes Maré.",
-      lat = -22.85172,
-      lon = -43.24457
-    ) ## For new ar quality station - check the table name
+    ) ## Render RJ map when "mare" virtual st. is selected
   )
   
 
@@ -174,7 +193,7 @@ server <- function(input, output, session) {
   # INPUT PIPELINE -----------------------------------------------------
 
   # Available stations (tables)
-  station_names <- c("tb_estacao_1b", "tb_estacao_3", "tb_estacao_4") ## OBS. Verificar nome estacao 4
+  station_names <- c("tb_estacao_1b", "mare") # Using "mare" virtual st. instead of separated tables
 
   station_choices <- setNames(
     station_names,
@@ -200,12 +219,11 @@ server <- function(input, output, session) {
     
     req(input$station)
     
-    ## FIX 1/2: Remove cat. 34 from Mare St.
     # Choose active metadata according to station
-    if (input$station == "tab_estacao_4") {
-      active_labels <- airQuality_labels
-      active_categories <- airQuality_cats
-      active_config <- airQuality_config
+    if (input$station == "mare") {
+      active_labels <- c(sensor_labels, airQuality_labels)
+      active_categories <- c(categories, airQuality_cats)
+      active_config <- c(sensor_config, airQuality_config)
     } else {
       active_labels <- sensor_labels
       active_categories <- categories
@@ -219,78 +237,88 @@ server <- function(input, output, session) {
     )
     
   })
-
   # Input event-driven reactive logic for DATE calendar menu ------------
   observeEvent(
     input$station,
     {
-      # Get available dates (for selected station) to populate the calendar
-      dates_df <- DBI::dbGetQuery(
-        con,
-        paste0(
-          "SELECT DISTINCT DATE(time) as d FROM ",
-          schema,
-          ".",
-          input$station,
-          " ORDER BY d"
-        ) ## DB query to get unique available dates (without time stamps) sorted chronologically
-      ) ## OBS. NAo esquecer DATE(time) → removes ONLY date part!
-
-      # Convert available dates (in column d) to date object
-      available_dates <- as.Date(dates_df$d)
-
+      req(input$station)
+      
+      # Get real table names from selected station
+      station_tables <- get_station_tables(input$station)
+      
+      # Get available dates from selected station/table(s)
+      available_dates <- c()
+      
+      for (table_name in station_tables) {
+        
+        dates_df <- DBI::dbGetQuery(
+          con,
+          paste0(
+            "SELECT DISTINCT DATE(time) as d FROM ",
+            schema,
+            ".",
+            table_name,
+            " ORDER BY d"
+          )
+        )
+        
+        available_dates <- c(available_dates, as.Date(dates_df$d))
+      }
+      
+      available_dates <- sort(unique(available_dates))
+      
       # Get latest available date
-      latest_date <- max(available_dates, na.rm = TRUE) ## Nao esquecer na.rm = TRUE → remove NA data before any calculation!
-
+      latest_date <- max(available_dates, na.rm = TRUE)
+      
       # Dynamic input calendar update
       updateDateInput(
         session,
         "selected_date",
-        value = latest_date, ## Set latest available as default selected choice
-        min = min(available_dates), ## Sets the earliest selectable date
-        max = latest_date ## Sets the latest selectable date
+        value = latest_date,
+        min = min(available_dates),
+        max = latest_date
       )
-
+      
       # Input Reactive conditional logic for SENSOR dropdown menu ----------------
-      req(input$station)
-
-      # Detect available sensors in selected station
-      sensors_df <- DBI::dbGetQuery(
-        con,
-        paste0(
-          "SELECT DISTINCT sensor FROM ",
-          schema,
-          ".",
-          input$station,
-          " ORDER BY sensor"
-        ) ## gets sensor col from DB and return df order by sensor
-      )
-
-      # Convert sensor numeric values as char
-      sensor_ids <- as.character(sensors_df$sensor) ## OBS. Estava dando errado porque nos labels armazenei esses dados como string!
-
-      # Remove unwanted sensors (such stations connectivity info) for ALL stations
-      excluded_global <- c("1", "25", "26") ## Wifi, Bluetooth and Mobile data
       
-      # Remove unwanted sensors for SPECIFIC stations 
-      excluded_by_station <- list(
-        "tb_estacao_3" = c("48", "49"),
-        "tb_estacao_4" = c("23") ## Pressure sensor - already in main station
-      )
+      # Detect available sensors in selected station/table(s)
+      sensor_ids <- character(0)
       
-      # Rule to handle NULL results
-      station_excluded <- excluded_by_station[[input$station]]
-      if (is.null(station_excluded)) {
-        station_excluded <-character(0) ## empty vector (character(0)) to avoid NULL retrieve
+      for (table_name in station_tables) {
+        
+        sensors_df <- DBI::dbGetQuery(
+          con,
+          paste0(
+            "SELECT DISTINCT sensor FROM ",
+            schema,
+            ".",
+            table_name,
+            " ORDER BY sensor"
+          )
+        )
+        
+        table_sensor_ids <- as.character(sensors_df$sensor)
+        
+        # Get table-specific exclusions
+        table_excluded <- excluded_by_table[[table_name]]
+        
+        if (is.null(table_excluded)) {
+          table_excluded <- character(0)
+        }
+        
+        # Apply global and table-specific exclusions
+        table_sensor_ids <- table_sensor_ids[
+          !table_sensor_ids %in% c(excluded_global, table_excluded)
+        ]
+        
+        sensor_ids <- c(sensor_ids, table_sensor_ids)
       }
       
-      # Remove ALL unwanted sensors (global and by station)
-      sensor_ids <- sensor_ids[!sensor_ids %in% c(excluded_global, station_excluded)] ## Keeps only sensors that are not in the excluded list categories
+      sensor_ids <- unique(sensor_ids)
       
       # Get active sensor metadata from reactive expression
       meta <- sensor_meta()
-
-      ## FIX 2/2: Remove cat. 34 from Mare St.
+      
       # Keep only categories that still have at least one available sensor
       available_categories <- Filter(
         function(cat) {
@@ -299,7 +327,7 @@ server <- function(input, output, session) {
         meta$categories
       )
       
-      ## DEBUG
+      # DEBUG: check available categories after filtering
       print(names(available_categories))
       
       # Get sensor ids from available categories
@@ -314,8 +342,8 @@ server <- function(input, output, session) {
       category_choices <- setNames(
         paste0("cat_", names(available_categories)),
         names(available_categories)
-      ) 
-
+      )
+      
       # Set label choices for missing sensors in the sensor dropdown menu
       standalone_choices <- setNames(
         standalone_ids,
@@ -326,17 +354,17 @@ server <- function(input, output, session) {
             paste("Sensor", id)
           }
         })
-      ) ## for each id, if id is in sensor names dictionary, use the defined name, otherwise, show "Sensor" and id number
-
+      )
+      
       # Put all dropdown label choices together in one vector
       all_choices <- c(category_choices, standalone_choices)
-
+      
       # Update and populate sensor dropdown menu with categories and missing sensor label choices
       updateSelectInput(
         session,
         "sensor",
         choices = all_choices,
-        selected = all_choices[1] ## firts choice selected by default
+        selected = all_choices[1]
       )
     },
     ignoreInit = TRUE
@@ -348,57 +376,86 @@ server <- function(input, output, session) {
 
   # Reactive logic to fetch daily station data by sensor
   sensor_data <- reactive({
-    # Input Reactive conditional logic to retrieve available dates for selected station
+    
     req(input$station, input$selected_date)
-
-    # Get all unique available dates
-    dates_df <- DBI::dbGetQuery(
-      con,
-      paste0(
-        "SELECT DISTINCT DATE(time) as d FROM ",
-        schema,
-        ".",
-        input$station
+    
+    # Get real table names from selected station
+    station_tables <- get_station_tables(input$station)
+    
+    # Get available dates from selected station/table(s)
+    available_dates <- c()
+    
+    for (table_name in station_tables) {
+      
+      dates_df <- DBI::dbGetQuery(
+        con,
+        paste0(
+          "SELECT DISTINCT DATE(time) as d FROM ",
+          schema,
+          ".",
+          table_name
+        )
       )
-    )
-
-    # Convert available dates (in column d) to date object
-    available_dates <- as.Date(dates_df$d)
-
-    # Covert selected date as date object
+      
+      available_dates <- c(available_dates, as.Date(dates_df$d))
+    }
+    
+    available_dates <- sort(unique(available_dates))
+    
+    # Convert selected date as date object
     selected_date <- as.Date(input$selected_date)
-
+    
     # Fallback logic for unavailable dates
-    if (!selected_date %in% available_dates) {
-      selected_date <- max(available_dates[available_dates <= selected_date]) ## If the chosen date is not in available dates list, replace it with the closest earlier available date
-    } ## OBS. Rever. Separation of conscerns → delegar para a UI
-
+    # if (!selected_date %in% available_dates) {
+      # selected_date <- max(available_dates[available_dates <= selected_date])
+    # } ## OBS. RETIRAR. Separation of conscerns → delegar para a UI
+    
     # Define daily data for main chart plots
     start_time <- as.POSIXct(selected_date)
-    end_time <- start_time + lubridate::days(1) ## Takes everything btw 00:00 to 00:00 of the selected day
-
-    # "Lazy" DB reference to fetch daily data
-    df <- dplyr::tbl(con, DBI::Id(schema, input$station)) |>
-      dplyr::filter(
-        time >= start_time,
-        time < end_time
-      ) |>
-      dplyr::select(sensor, time, value) |> ## Keep sensor, time and value cols
-      dplyr::arrange(sensor, time) |> ## arrange rows by time, so no zig-zag plot pattern
-      dplyr::collect() ## execute the SQL query
+    end_time <- start_time + lubridate::days(1)
     
-    df$time <- df$time - lubridate::hours(3) ## convert UTC time-zone to Brasilia time by substracting 3 hours
-    ## OBS. Se nao funcionar, usar df$time <- lubridate::with_tz(df$time, "America/Sao_Paulo")
+    # Fetch daily data from selected station/table(s)
+    df_list <- list()
+    
+    for (table_name in station_tables) {
+      
+      # Original production syntax kept for compatibility.
+      # Alternative syntax: DBI::Id(schema = schema, table = table_name)
+      df_table <- dplyr::tbl(con, DBI::Id(schema, table_name)) |>
+        dplyr::filter(
+          time >= start_time,
+          time < end_time
+        ) |>
+        dplyr::select(sensor, time, value) |>
+        dplyr::arrange(sensor, time) |>
+        dplyr::collect()
+      
+      table_excluded <- excluded_by_table[[table_name]]
+      
+      if (is.null(table_excluded)) {
+        table_excluded <- character(0)
+      }
+      
+      df_table <- df_table |>
+        dplyr::filter(
+          !sensor %in% as.integer(c(excluded_global, table_excluded))
+        )
+      
+      df_list[[table_name]] <- df_table
+    }
+    
+    df <- dplyr::bind_rows(df_list)
+    
+    df$time <- df$time - lubridate::hours(3)
     
     df
-    
   })
 
   # Data pipeline to ploting KPI cards -------------------------------------------
   
   # KPI station schema 
   kpi_station_map <- c(
-    "tb_estacao_4" = "tb_estacao_3"
+    "mare" = "tb_estacao_3" # Update kpi st. map to use mare tab
   ) ## OBS. Mapping vectors são melhores se precisar acrescentar mais uma estação com essa regra
   
   # Rule for choosing which station will be used on KPI Cards
