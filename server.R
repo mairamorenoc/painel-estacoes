@@ -44,11 +44,11 @@ server <- function(input, output, session) {
     "11" = "Umidade (%)",
     "18" = "Luminosidade (lux)",
     "19" = "UV (uv)",
-    "22" = "Ponto de Orvalho (°C)",
+    "22" = "Ponto de orvalho (°C)",
     "23" = "Pressão (hPa)",
     "27" = "Sensação térmica (°C)",
     "28" = "Delta T (°C)",
-    "34" = "Nivel de líquidos (mca)",
+    "34" = "Nivel do rio (mca)",
     "35" = "Chuva (mm)",
     "36" = "Vento (km/h)",
     "37" = "Rajada (km/h)",
@@ -103,7 +103,7 @@ server <- function(input, output, session) {
     Umidade = list(ids = c("11"), unit = "%"),
     Pressão = list(ids = c("23"), unit = "hPa"),
     Chuva = list(ids = c("35"), unit = "mm"),
-    "Nivel de Liquidos" = list(ids = c("34"), unit = "mca"),
+    "Nivel do rio" = list(ids = c("34"), unit = "mca"),
     Vento = list(ids = c("36", "347", "37", "348"), unit = "Km/h"),
     Luminosidade = list(ids = c("18"), unit = "lux"),
     UV = list(ids = c("19"), unit = "uv")
@@ -114,8 +114,8 @@ server <- function(input, output, session) {
   # Label dictionary for air quality sensors
   airQuality_labels <- c(
     "70"   = "Ozônio (O3)",
-    "71"  = "Material Particulado 2.5 (PM2.5)",
-    "72"  = "Material Particulado 10 (PM10)",
+    "71"  = "PM2.5",
+    "72"  = "PM10",
     "73"  = "Dióxido de Enxofre (SO2)",
     "74"  = "Dióxido de Nitrogênio (NO2)",
     "75"  = "Monóxido de Carbono (CO)"
@@ -237,147 +237,443 @@ server <- function(input, output, session) {
     )
     
   })
-  # Input event-driven reactive logic for DATE calendar menu ------------
-  observeEvent(
-    input$station,
-    {
-      req(input$station)
+  
+  
+  # CODE BLOCK (CREATED 23.06.26) FOR NEW STATISTICS TAB ---------
+  # Populate station selector - Statistics tab
+  observe({
+    
+    updateSelectInput(
+      session,
+      "stats_station",
+      choices = station_choices,
+      selected = unname(station_choices[1])
+    )
+  })
+  
+  # Populate sensor selector - Statistics tab
+  observeEvent(input$stats_station, {
+    
+    req(input$stats_station)
+    
+    stats_station <- input$stats_station
+    
+    stats_tables <- if (stats_station == "mare") {
+      c("tb_estacao_3", "tb_estacao_4")
+    } else {
+      stats_station
+    }
+    
+    available_sensors <- c()
+    
+    for (table_name in stats_tables) {
       
-      # Get real table names from selected station
-      station_tables <- get_station_tables(input$station)
-      
-      # Get available dates from selected station/table(s)
-      available_dates <- c()
-      
-      for (table_name in station_tables) {
-        
-        dates_df <- DBI::dbGetQuery(
-          con,
-          paste0(
-            "SELECT DISTINCT DATE(time) as d FROM ",
-            schema,
-            ".",
-            table_name,
-            " ORDER BY d"
-          )
+      sensors_df <- DBI::dbGetQuery(
+        con,
+        paste0(
+          "SELECT DISTINCT sensor
+         FROM ", schema, ".", table_name, "
+         ORDER BY sensor"
         )
-        
-        available_dates <- c(available_dates, as.Date(dates_df$d))
-      }
-      
-      available_dates <- sort(unique(available_dates))
-      
-      # Get latest available date
-      latest_date <- max(available_dates, na.rm = TRUE)
-      
-      # Dynamic input calendar update
-      updateDateInput(
-        session,
-        "selected_date",
-        value = latest_date,
-        min = min(available_dates),
-        max = latest_date
       )
       
-      # Input Reactive conditional logic for SENSOR dropdown menu ----------------
+      available_sensors <- c(available_sensors, sensors_df$sensor)
+    }
+    
+    available_sensors <- sort(unique(as.character(available_sensors)))
+    
+    allowed_labels <- sensor_labels
+    
+    if (stats_station == "mare") {
+      allowed_labels <- c(sensor_labels, airQuality_labels)
+    }
+    
+    available_sensors <- available_sensors[
+      available_sensors %in% names(allowed_labels)
+    ]
+    
+    if (length(available_sensors) == 0) {
       
-      # Detect available sensors in selected station/table(s)
-      sensor_ids <- character(0)
-      
-      for (table_name in station_tables) {
-        
-        sensors_df <- DBI::dbGetQuery(
-          con,
-          paste0(
-            "SELECT DISTINCT sensor FROM ",
-            schema,
-            ".",
-            table_name,
-            " ORDER BY sensor"
-          )
-        )
-        
-        table_sensor_ids <- as.character(sensors_df$sensor)
-        
-        # Get table-specific exclusions
-        table_excluded <- excluded_by_table[[table_name]]
-        
-        if (is.null(table_excluded)) {
-          table_excluded <- character(0)
-        }
-        
-        # Apply global and table-specific exclusions
-        table_sensor_ids <- table_sensor_ids[
-          !table_sensor_ids %in% c(excluded_global, table_excluded)
-        ]
-        
-        sensor_ids <- c(sensor_ids, table_sensor_ids)
-      }
-      
-      sensor_ids <- unique(sensor_ids)
-      
-      # Get active sensor metadata from reactive expression
-      meta <- sensor_meta()
-      
-      # Keep only categories that still have at least one available sensor
-      available_categories <- Filter(
-        function(cat) {
-          any(cat$ids %in% sensor_ids)
-        },
-        meta$categories
-      )
-      
-      # DEBUG: check available categories after filtering
-      print(names(available_categories))
-      
-      # Get sensor ids from available categories
-      categorized_ids <- unique(
-        unlist(lapply(available_categories, function(i) i$ids))
-      )
-      
-      # Get all unlisted sensors
-      standalone_ids <- sensor_ids[!sensor_ids %in% categorized_ids]
-      
-      # Set category label choices for sensor categories dropdown menu
-      category_choices <- setNames(
-        paste0("cat_", names(available_categories)),
-        names(available_categories)
-      )
-      
-      # Set label choices for missing sensors in the sensor dropdown menu
-      standalone_choices <- setNames(
-        standalone_ids,
-        sapply(standalone_ids, function(id) {
-          if (id %in% names(meta$labels)) {
-            meta$labels[id]
-          } else {
-            paste("Sensor", id)
-          }
-        })
-      )
-      
-      # Put all dropdown label choices together in one vector
-      all_choices <- c(category_choices, standalone_choices)
-      
-      # Update and populate sensor dropdown menu with categories and missing sensor label choices
       updateSelectInput(
         session,
-        "sensor",
-        choices = all_choices,
-        selected = all_choices[1]
+        "stats_sensor",
+        choices = character(0),
+        selected = character(0)
       )
-    },
-    ignoreInit = TRUE
-  ) ## OBS. NAO ESQUECER: ignoreInit = TRUE → Run code ONLY when the user changes the input
-
-  # PREPARING DATA FOR PLOTING -----------------------------------------------
-
-  # Data pipeline to plotting MAIN charts -----------------------------------------
-
-  # Reactive logic to fetch daily station data by sensor
-  sensor_data <- reactive({
+      
+      return()
+    }
     
-    req(input$station, input$selected_date)
+    sensor_choices <- setNames(
+      available_sensors,
+      allowed_labels[available_sensors]
+    )
+    
+    updateSelectInput(
+      session,
+      "stats_sensor",
+      choices = sensor_choices,
+      selected = available_sensors[1]
+    )
+  })
+  
+  # Calculate selected period - Statistics tab
+  stats_period_range <- reactive({
+    
+    req(input$stats_base_date)
+    req(input$stats_period)
+    
+    base_date <- as.Date(input$stats_base_date)
+    
+    if (input$stats_period == "day") {
+      
+      start_date <- base_date
+      end_date <- base_date
+      period_label <- "Dia"
+      
+    } else if (input$stats_period == "week") {
+      
+      # Monday to Sunday
+      start_date <- base_date - lubridate::days(lubridate::wday(base_date, week_start = 1) - 1)
+      end_date <- start_date + lubridate::days(6)
+      period_label <- "Semana"
+      
+    } else {
+      
+      # Full calendar month
+      start_date <- as.Date(format(base_date, "%Y-%m-01"))
+      end_date <- seq(start_date, length = 2, by = "1 month")[2] - 1
+      period_label <- "Mês"
+    }
+    
+    list(
+      start_date = start_date,
+      end_date = end_date,
+      start_time = as.POSIXct(start_date),
+      end_time = as.POSIXct(end_date) + lubridate::days(1),
+      label = period_label
+    )
+  })
+  
+  # Get selected sensor data - Statistics tab
+  stats_sensor_data <- reactive({
+    
+    req(input$stats_station)
+    req(input$stats_sensor)
+    
+    period <- stats_period_range()
+    
+    selected_sensor <- as.integer(input$stats_sensor)
+    
+    stats_tables <- if (input$stats_station == "mare") {
+      c("tb_estacao_3", "tb_estacao_4")
+    } else {
+      input$stats_station
+    }
+    
+    df_all <- data.frame()
+    
+    for (table_name in stats_tables) {
+      
+      df <- DBI::dbGetQuery(
+        con,
+        paste0(
+          "SELECT sensor, time, value
+         FROM ", schema, ".", table_name, "
+         WHERE sensor = ", selected_sensor, "
+         AND time >= '", period$start_time, "'
+         AND time < '", period$end_time, "'
+         ORDER BY time"
+        )
+      )
+      
+      if (nrow(df) > 0) {
+        df$table_name <- table_name
+        df_all <- dplyr::bind_rows(df_all, df)
+      }
+    }
+    
+    if (nrow(df_all) == 0) {
+      return(df_all)
+    }
+    
+    df_all$time <- df_all$time - lubridate::hours(3)
+    
+    df_all
+  })
+  
+  # Update base date according to selected station and sensor - Statistics tab
+  observeEvent(list(input$stats_station, input$stats_sensor), {
+    
+    req(input$stats_station)
+    req(input$stats_sensor)
+    
+    selected_sensor <- as.integer(input$stats_sensor)
+    
+    stats_tables <- if (input$stats_station == "mare") {
+      c("tb_estacao_3", "tb_estacao_4")
+    } else {
+      input$stats_station
+    }
+    
+    available_times <- c()
+    
+    for (table_name in stats_tables) {
+      
+      time_df <- DBI::dbGetQuery(
+        con,
+        paste0(
+          "SELECT MIN(time) AS min_time, MAX(time) AS max_time
+         FROM ", schema, ".", table_name, "
+         WHERE sensor = ", selected_sensor
+        )
+      )
+      
+      if (
+        nrow(time_df) > 0 &&
+        !is.na(time_df$min_time[1]) &&
+        !is.na(time_df$max_time[1])
+      ) {
+        available_times <- c(
+          available_times,
+          time_df$min_time[1],
+          time_df$max_time[1]
+        )
+      }
+    }
+    
+    if (length(available_times) == 0) {
+      
+      updateDateInput(
+        session,
+        "stats_base_date",
+        value = NULL,
+        min = NULL,
+        max = NULL
+      )
+      
+      return()
+    }
+    
+    available_times <- as.POSIXct(available_times)
+    available_times <- available_times - lubridate::hours(3)
+    
+    min_date <- min(as.Date(available_times), na.rm = TRUE)
+    max_date <- max(as.Date(available_times), na.rm = TRUE)
+    
+    updateDateInput(
+      session,
+      "stats_base_date",
+      value = max_date,
+      min = min_date,
+      max = max_date
+    )
+  })
+  
+  # Helpers - Statistics tab
+  get_stats_sensor_label <- reactive({
+    
+    req(input$stats_sensor)
+    
+    sensor_id <- as.character(input$stats_sensor)
+    
+    if (sensor_id %in% names(sensor_labels)) {
+      return(sensor_labels[sensor_id])
+    }
+    
+    if (sensor_id %in% names(airQuality_labels)) {
+      return(airQuality_labels[sensor_id])
+    }
+    
+    paste("Sensor", sensor_id)
+  })
+  
+  get_stats_sensor_unit <- reactive({
+    
+    req(input$stats_sensor)
+    
+    sensor_id <- as.character(input$stats_sensor)
+    sensor_label <- get_stats_sensor_label()
+    
+    # Air quality sensors
+    if (sensor_id %in% c("71", "72")) {
+      return("µg/m³")
+    }
+    
+    if (sensor_id %in% c("70", "73", "74", "75")) {
+      return("ppm")
+    }
+    
+    # Unit inside parentheses, e.g. "Temperatura (°C)"
+    unit <- sub(".*\\((.*)\\).*", "\\1", sensor_label)
+    
+    if (unit != sensor_label) {
+      return(unit)
+    }
+    
+    ""
+  })
+  
+  format_stats_value <- function(value, unit = "", digits = 1) {
+    
+    if (is.na(value)) {
+      return("—")
+    }
+    
+    value <- round(value, digits)
+    
+    if (unit == "") {
+      return(as.character(value))
+    }
+    
+    paste(value, unit)
+  }
+  
+  # Outputs - Statistics tab
+  output$stats_summary_title <- renderUI({
+    
+    period <- stats_period_range()
+    df <- stats_sensor_data()
+    sensor_label <- get_stats_sensor_label()
+    
+    tags$div(
+      style = "margin-bottom: 1rem; color: #6c757d;",
+      tags$strong("Sensor analisado: "),
+      sensor_label,
+      tags$br(),
+      tags$strong("Período analisado: "),
+      paste0(
+        format(period$start_date, "%d-%m-%Y"),
+        " até ",
+        format(period$end_date, "%d-%m-%Y")
+      ),
+      tags$br(),
+      tags$strong("Registros encontrados: "),
+      nrow(df)
+    )
+  })
+  
+  output$stats_min_value <- renderUI({
+    
+    df <- stats_sensor_data()
+    unit <- get_stats_sensor_unit()
+    
+    if (nrow(df) == 0) {
+      return("—")
+    }
+    
+    sensor_label <- get_stats_sensor_label()
+    
+    if (grepl("Chuva", sensor_label, ignore.case = TRUE)) {
+      return(format_stats_value(sum(df$value, na.rm = TRUE), unit))
+    }
+    
+    format_stats_value(min(df$value, na.rm = TRUE), unit)
+  })
+  
+  output$stats_min_sub <- renderUI({
+    
+    sensor_label <- get_stats_sensor_label()
+    
+    if (grepl("Chuva", sensor_label, ignore.case = TRUE)) {
+      return("Chuva acumulada no período")
+    }
+    
+    "Valor mínimo"
+  })
+  
+  output$stats_max_value <- renderUI({
+    
+    df <- stats_sensor_data()
+    unit <- get_stats_sensor_unit()
+    
+    if (nrow(df) == 0) {
+      return("—")
+    }
+    
+    format_stats_value(max(df$value, na.rm = TRUE), unit)
+  })
+  
+  output$stats_max_sub <- renderUI({
+    
+    sensor_label <- get_stats_sensor_label()
+    
+    if (grepl("Rajada", sensor_label, ignore.case = TRUE)) {
+      return("Rajada máxima")
+    }
+    
+    if (grepl("Chuva", sensor_label, ignore.case = TRUE)) {
+      return("Maior leitura")
+    }
+    
+    "Valor máximo"
+  })
+  
+  output$stats_avg_value <- renderUI({
+    
+    df <- stats_sensor_data()
+    unit <- get_stats_sensor_unit()
+    
+    if (nrow(df) == 0) {
+      return("—")
+    }
+    
+    format_stats_value(mean(df$value, na.rm = TRUE), unit)
+  })
+  
+  output$stats_avg_sub <- renderUI({
+    
+    sensor_label <- get_stats_sensor_label()
+    
+    if (grepl("Chuva", sensor_label, ignore.case = TRUE)) {
+      return("Média das leituras")
+    }
+    
+    if (grepl("Vento|Rajada", sensor_label, ignore.case = TRUE)) {
+      return("Velocidade média")
+    }
+    
+    "Média"
+  })
+  
+  output$stats_period_value <- renderUI({
+    
+    period <- stats_period_range()
+    
+    period$label
+  })
+  
+  output$stats_period_sub <- renderUI({
+    
+    period <- stats_period_range()
+    
+    paste0(
+      format(period$start_date, "%d-%m-%Y"),
+      " até ",
+      format(period$end_date, "%d-%m-%Y")
+    )
+  })
+  
+  output$stats_empty_message <- renderUI({
+    
+    df <- stats_sensor_data()
+    
+    if (nrow(df) > 0) {
+      return(NULL)
+    }
+    
+    tags$div(
+      style = "margin-top: 1rem; color: #6c757d;",
+      icon("circle-info", class = "me-2"),
+      "Sem dados disponíveis para este sensor no período selecionado."
+    )
+  })
+  
+  
+  # (UPDATED 23.06.26) Input event-driven reactive logic for DATE calendar menu ------------
+  observeEvent(input$station, {
+    
+    req(input$station)
     
     # Get real table names from selected station
     station_tables <- get_station_tables(input$station)
@@ -390,38 +686,173 @@ server <- function(input, output, session) {
       dates_df <- DBI::dbGetQuery(
         con,
         paste0(
-          "SELECT DISTINCT DATE(time) as d FROM ",
-          schema,
-          ".",
-          table_name
+          "SELECT DISTINCT DATE(time) as d
+         FROM ", schema, ".", table_name, "
+         ORDER BY d"
         )
       )
       
       available_dates <- c(available_dates, as.Date(dates_df$d))
     }
     
+    # Protection logic for undated station
     available_dates <- sort(unique(available_dates))
     
-    # Convert selected date as date object
-    selected_date <- as.Date(input$selected_date)
+    if (length(available_dates) == 0) {
+      
+      updateDateRangeInput(
+        session,
+        "selected_date",
+        start = NULL,
+        end = NULL,
+        min = NULL,
+        max = NULL
+      )
+      
+      updateSelectInput(
+        session,
+        "sensor",
+        choices = character(0),
+        selected = character(0)
+      )
+      
+      return()
+    }
     
-    # Fallback logic for unavailable dates
-    # if (!selected_date %in% available_dates) {
-      # selected_date <- max(available_dates[available_dates <= selected_date])
-    # } ## OBS. RETIRAR. Separation of conscerns → delegar para a UI
+    # Get latest available date
+    latest_date <- max(available_dates, na.rm = TRUE) ## Nao esquecer na.rm = TRUE → remove NA data before any calculation!
     
-    # Define daily data for main chart plots
-    start_time <- as.POSIXct(selected_date)
-    end_time <- start_time + lubridate::days(1)
+    # Dynamic input calendar update
+    # Default behavior: start and end on the latest available date -> keeps the initial plot limited to the latest available day
+    updateDateRangeInput(
+      session,
+      "selected_date",
+      start = latest_date,
+      end   = latest_date,
+      min   = min(available_dates),
+      max   = latest_date
+    )
     
-    # Fetch daily data from selected station/table(s)
+    # Input Reactive conditional logic for SENSOR dropdown menu ----------------
+    
+    # Detect available sensors in selected station/table(s)
+    sensor_ids <- character(0)
+    
+    for (table_name in station_tables) {
+      
+      sensors_df <- DBI::dbGetQuery(
+        con,
+        paste0(
+          "SELECT DISTINCT sensor
+         FROM ", schema, ".", table_name, "
+         ORDER BY sensor"
+        )
+      )
+      
+      table_sensor_ids <- as.character(sensors_df$sensor)
+      
+      # Get table-specific exclusions
+      table_excluded <- excluded_by_table[[table_name]]
+      
+      if (is.null(table_excluded)) {
+        table_excluded <- character(0)
+      }
+      
+      # Apply global and table-specific exclusions
+      table_sensor_ids <- table_sensor_ids[
+        !table_sensor_ids %in% c(excluded_global, table_excluded)
+      ]
+      
+      sensor_ids <- c(sensor_ids, table_sensor_ids)
+    }
+    
+    sensor_ids <- unique(sensor_ids)
+    
+    # Get active sensor metadata from reactive expression
+    meta <- sensor_meta()
+    
+    # Keep only categories that still have at least one available sensor
+    available_categories <- Filter(
+      function(cat) {
+        any(cat$ids %in% sensor_ids)
+      },
+      meta$categories
+    )
+    
+    # DEBUG: check available categories after filtering
+    # print(names(available_categories))
+    
+    # Get sensor ids from available categories
+    categorized_ids <- unique(
+      unlist(lapply(available_categories, function(i) i$ids))
+    )
+    
+    # Get all unlisted sensors
+    standalone_ids <- sensor_ids[!sensor_ids %in% categorized_ids]
+    
+    # Set category label choices for sensor categories dropdown menu
+    category_choices <- setNames(
+      paste0("cat_", names(available_categories)),
+      names(available_categories)
+    )
+    
+    # Set label choices for missing sensors in the sensor dropdown menu
+    standalone_choices <- setNames(
+      standalone_ids,
+      sapply(standalone_ids, function(id) {
+        if (id %in% names(meta$labels)) {
+          meta$labels[id]
+        } else {
+          paste("Sensor", id)
+        }
+      })
+    ) ## for each id, if id is in sensor names dictionary, use the defined name, otherwise, show "Sensor" and id number
+    
+    # Put all dropdown label choices together in one vector
+    all_choices <- c(category_choices, standalone_choices)
+    
+    # Update and populate sensor dropdown menu with categories and missing sensor label choices
+    updateSelectInput(
+      session,
+      "sensor",
+      choices = all_choices,
+      selected = all_choices[1] ## firts choice selected by default
+    )
+    
+  }, ignoreInit = TRUE) ## OBS. NAO ESQUECER: ignoreInit = TRUE → Run code ONLY when the user changes the input
+  
+
+  # PREPARING DATA FOR PLOTING -----------------------------------------------
+
+  # (UPDATED 23.06.26) Data pipeline to plotting MAIN charts -----------------------------------------
+  
+  # Reactive logic to fetch station data by sensor
+  sensor_data <- reactive({
+    
+    req(input$station, input$selected_date)
+    req(!is.na(input$selected_date[1]), !is.na(input$selected_date[2]))
+    
+    # Get real table names from selected station
+    station_tables <- get_station_tables(input$station)
+    
+    # Convert selected date range as Date objects
+    start_date <- as.Date(input$selected_date[1])
+    end_date   <- as.Date(input$selected_date[2])
+    
+    # Define date range for main chart plots
+    # Add 1 day to end_date to include the whole final day.
+    start_time <- as.POSIXct(start_date)
+    end_time   <- as.POSIXct(end_date) + lubridate::days(1) ## Takes everything btw 00:00 to 00:00 of the selected day
+    
+    # Fetch data from selected station/table(s)
     df_list <- list()
     
     for (table_name in station_tables) {
       
-      # Original production syntax kept for compatibility.
-      # Alternative syntax: DBI::Id(schema = schema, table = table_name)
-      df_table <- dplyr::tbl(con, DBI::Id(schema, table_name)) |>
+      df_table <- dplyr::tbl(
+        con,
+        DBI::Id(schema = schema, table = table_name)
+      ) |>
         dplyr::filter(
           time >= start_time,
           time < end_time
@@ -446,74 +877,124 @@ server <- function(input, output, session) {
     
     df <- dplyr::bind_rows(df_list)
     
-    df$time <- df$time - lubridate::hours(3)
+    df$time <- df$time - lubridate::hours(3) ## Convert UTC timezone to Brasilia time-zone by substracting 3 hours
+    ## OBS. Se nao funcionar metodo manual, tentar: df$time <- lubridate::with_tz(df$time, "America/Sao_Paulo")
     
     df
   })
 
-  # Data pipeline to ploting KPI cards -------------------------------------------
+  # (UPDATED 23.06.26) Data pipeline to ploting KPI cards -------------------------------------------
   
-  # KPI station schema 
-  kpi_station_map <- c(
-    "mare" = "tb_estacao_3" # Update kpi st. map to use mare tab
-  ) ## OBS. Mapping vectors são melhores se precisar acrescentar mais uma estação com essa regra
-  
-  # Rule for choosing which station will be used on KPI Cards
-  kpi_station <- reactive({
+  # Function to get latest sensor data from a specific table
+  get_latest_sensor_data <- function(table_name, sensor_id) {
     
-    req(input$station)
-    
-    if (input$station %in% names(kpi_station_map)) {
-      kpi_station_map[[input$station]]
-    } else {
-      input$station
-    }
-    
-  })
-  
-  # Fetch latest hour from KPI specific sensors
-  latest_data <- reactive({
-    req(kpi_station()) ## this will use reactive rule instead of input$station
-
-    sensor_ids <- c(8, 23, 35, 36, 347) ## Predefined key indicators sensors
-    sensor_sql <- paste(sensor_ids, collapse = ", ") ## Take all sensor IDs and combine them into one comma-separated string → ideal for SQL query
-    
-    # UPDATED DB query
     df <- DBI::dbGetQuery(
       con,
       paste0(
-        "SELECT t.sensor, t.time, t.value
-       FROM ", schema, ".", kpi_station(), " t
-       INNER JOIN (
-         SELECT sensor, MAX(time) AS max_time
-         FROM ", schema, ".", kpi_station(), "
-         WHERE sensor IN (", sensor_sql, ")
-         GROUP BY sensor
-       ) last
-       ON t.sensor = last.sensor
-       AND t.time = last.max_time
-       WHERE t.sensor IN (", sensor_sql, ")"
+        "SELECT sensor, time, value
+       FROM ", schema, ".", table_name, "
+       WHERE sensor = ", sensor_id, "
+       ORDER BY time DESC
+       LIMIT 1"
       )
-    ) ## Now this returns the last available value for each KPI sensor and not just the the last available according to time stamp
+    )
     
-    df$time <- df$time - lubridate::hours(3) ## UTC to brasilia time-zone
+    if (nrow(df) == 0) {
+      return(NULL)
+    }
+    
+    # Convert UTC to Brasília time
+    df$time <- df$time - lubridate::hours(3)
+    
+    df[1, ]
+  }
+  
+  # Function to get all data from the latest available day for one or more sensors
+  get_kpi_day_data <- function(table_name, sensor_ids) {
+    
+    sensor_ids <- as.integer(sensor_ids)
+    
+    # Find latest timestamp available for these sensors
+    latest_df <- DBI::dbGetQuery(
+      con,
+      paste0(
+        "SELECT MAX(time) AS max_time
+       FROM ", schema, ".", table_name, "
+       WHERE sensor IN (", paste(sensor_ids, collapse = ", "), ")"
+      )
+    )
+    
+    if (nrow(latest_df) == 0 || is.na(latest_df$max_time[1])) {
+      return(data.frame(
+        sensor = integer(),
+        time = as.POSIXct(character()),
+        value = numeric()
+      ))
+    }
+    
+    latest_day <- as.Date(latest_df$max_time[1])
+    
+    start_time <- as.POSIXct(latest_day)
+    end_time   <- start_time + lubridate::days(1)
+    
+    # Fetch all records from the latest available day
+    df <- DBI::dbGetQuery(
+      con,
+      paste0(
+        "SELECT sensor, time, value
+       FROM ", schema, ".", table_name, "
+       WHERE sensor IN (", paste(sensor_ids, collapse = ", "), ")
+       AND time >= '", start_time, "'
+       AND time < '", end_time, "'
+       ORDER BY sensor, time"
+      )
+    )
+    
+    if (nrow(df) == 0) {
+      return(df)
+    }
+    
+    # Convert UTC to Brasília time
+    df$time <- df$time - lubridate::hours(3)
     
     df
+  }
+  
+  # Helper to get the latest value from a KPI dataframe
+  get_latest_value <- function(df) {
     
-  })
-
-  # Function to get each KPI sensor data
-  get_sensor_value <- function(placeholder_id) {
-    df <- latest_data()
-    vals <- df$value[df$sensor == placeholder_id]
-    
-    if (length(vals) == 0) {
+    if (nrow(df) == 0) {
       return(NA_real_)
-    } ## Adds defensive programming expression
+    }
     
-    vals[1]
+    df <- df[order(df$time, decreasing = TRUE), ]
+    
+    df$value[1]
+  }
+  
+  # Helper to get the latest timestamp from a KPI dataframe
+  get_latest_time <- function(df) {
+    
+    if (nrow(df) == 0) {
+      return("Sem dados")
+    }
+    
+    format(max(df$time, na.rm = TRUE), "%d-%m-%Y %H:%M")
+  }
+  
+  # Helper to format KPI values
+  format_kpi_value <- function(value, unit, digits = 1) {
+    
+    if (is.na(value)) {
+      return("Sem dados")
+    }
+    
+    value <- round(value, digits)
+    
+    paste0(value, " ", unit)
   } 
 
+  
   # PLOTING DATA-----------------------------------------
 
   # Get station names for plots labeling
@@ -552,160 +1033,389 @@ server <- function(input, output, session) {
       )
   })
   
+  # (UPDATED 23.06.23) Render selected station heading above KPI cards
+  output$selected_station_heading <- renderUI({
+    
+    req(input$station)
+    
+    tags$div(
+      class = "station-heading",
+      tags$span(
+        class = "station-heading-icon",
+        icon("location-dot")
+      ),
+      tags$h3(station_nm())
+    )
+  })
 
-  # Render KPI charts ----------------------------------
+  # (UPDATED 23.06.26) Render KPI charts ----------------------------------
 
   # Temperature KPI Card
   output$temp_value <- renderUI({
-    value <- get_sensor_value(8)
-    tags$div(class = "kpi-value", paste0(value, " °C"))
-  })
-
-  # Rain KPI CArd
-  output$rain_value <- renderUI({
-    value <- get_sensor_value(35)
-    tags$div(class = "kpi-value", paste0(value, " mm"))
-  })
-
-  # Pressure KPI Card
-  output$pressure_value <- renderUI({
-    value <- get_sensor_value(23)
-    tags$div(class = "kpi-value", paste0(value, " hPa"))
-  })
-
-  # Wind KPI Card
-  output$wind_value <- renderUI({
+    
     req(input$station)
-
-    df <- latest_data()
-    req(nrow(df) > 0)
-
-    # Get wind value (sensor 36 or 347)
-    value <- df$value[df$sensor %in% c(36, 347)][1]
-
-    req(!is.na(value))
-
+    
+    if (input$station == "mare") {
+      df <- get_kpi_day_data("tb_estacao_3", 8)
+    } else {
+      df <- get_kpi_day_data(input$station, 8)
+    }
+    
+    value <- get_latest_value(df)
+    
     tags$div(
       class = "kpi-value",
-      paste0(round(value, 1), " km/h")
+      format_kpi_value(value, "°C")
+    )
+  })
+  
+  # Rain KPI Card
+  output$rain_value <- renderUI({
+    
+    req(input$station)
+    
+    if (input$station == "mare") {
+      df <- get_kpi_day_data("tb_estacao_3", 35)
+    } else {
+      df <- get_kpi_day_data(input$station, 35)
+    }
+    
+    value <- get_latest_value(df)
+    
+    tags$div(
+      class = "kpi-value",
+      format_kpi_value(value, "mm")
+    )
+  })
+  
+  # Third KPI title: Pressure for Merajuba, Air Quality for Mare
+  output$third_kpi_title <- renderUI({
+    
+    req(input$station)
+    
+    if (input$station == "mare") {
+      tags$span(
+        icon("smog", class = "me-2"),
+        "Qualidade do Ar"
+      )
+    } else {
+      tags$span(
+        icon("gauge-high", class = "me-2"),
+        "Pressão"
+      )
+    }
+  })
+  
+  # Third KPI value: Pressure for Merajuba, Air Quality for Mare
+  output$third_kpi_value <- renderUI({
+    
+    req(input$station)
+    
+    if (input$station == "mare") {
+      
+      pm25_data <- get_latest_sensor_data("tb_estacao_4", 71)
+      co_data   <- get_latest_sensor_data("tb_estacao_4", 75)
+      
+      pm25_value <- if (is.null(pm25_data)) NA_real_ else pm25_data$value
+      co_value   <- if (is.null(co_data)) NA_real_ else co_data$value
+      
+      pm25_time <- if (is.null(pm25_data)) {
+        "Sem dados"
+      } else {
+        format(pm25_data$time, "%d-%m-%Y %H:%M")
+      }
+      
+      co_time <- if (is.null(co_data)) {
+        "Sem dados"
+      } else {
+        format(co_data$time, "%d-%m-%Y %H:%M")
+      }
+      
+      tags$div(
+        class = "kpi-value",
+        style = "font-size: 1.25rem; line-height: 1.15;",
+        
+        tags$div(paste0("PM2.5: ", round(pm25_value, 1), " µg/m³")),
+        tags$div(
+          style = "font-size: 0.8rem; font-weight: 400; color: #6c757d; margin-bottom: 0.35rem;",
+          paste0("Atualizado: ", pm25_time)
+        ),
+        
+        tags$div(paste0("CO: ", round(co_value, 1), " ppm")),
+        tags$div(
+          style = "font-size: 0.8rem; font-weight: 400; color: #6c757d;",
+          paste0("Atualizado: ", co_time)
+        )
+      )
+      
+    } else {
+      
+      df <- get_kpi_day_data(input$station, 23)
+      value <- get_latest_value(df)
+      
+      tags$div(
+        class = "kpi-value",
+        format_kpi_value(value, "hPa")
+      )
+    }
+  })
+  
+  # Wind KPI Card
+  output$wind_value <- renderUI({
+    
+    req(input$station)
+    
+    if (input$station == "mare") {
+      df <- get_kpi_day_data("tb_estacao_3", c(36, 347))
+    } else {
+      df <- get_kpi_day_data(input$station, c(36, 347))
+    }
+    
+    value <- get_latest_value(df)
+    
+    tags$div(
+      class = "kpi-value",
+      format_kpi_value(value, "km/h")
     )
   })
 
-  # Formatting KPI CARDS subtitles -------------------------
-
-  formatted_time <- reactive({
-    df <- latest_data()
-    if (nrow(df) == 0) {
-      return(NULL)
-    }
-    format(df$time[1], "%d-%m-%Y %H:%M") ## Brazilian time format
-  })
-
+  # (UPDATED 23.06.26) Formatting KPI CARDS subtitles -------------------------
+  
   # Temperature
   output$temp_sub <- renderUI({
+    
+    req(input$station)
+    
+    if (input$station == "mare") {
+      df <- get_kpi_day_data("tb_estacao_3", 8)
+    } else {
+      df <- get_kpi_day_data(input$station, 8)
+    }
+    
+    if (nrow(df) == 0) {
+      return(
+        tagList(
+          "Sem dados disponíveis",
+          tags$br(),
+          tags$br(),
+          station_nm()
+        )
+      )
+    }
+    
+    min_value <- min(df$value, na.rm = TRUE)
+    max_value <- max(df$value, na.rm = TRUE)
+    
     tagList(
-      station_nm(), ## OBS. NAO esquecer () -> is reactive!
+      paste0("Mín.: ", format_kpi_value(min_value, "°C")),
       tags$br(),
-      formatted_time()
+      paste0("Máx.: ", format_kpi_value(max_value, "°C")),
+      tags$br(),
+      paste0("Atualizado: ", get_latest_time(df)),
+      tags$br(),
+      tags$br()
     )
   })
-
+  
   # Rain
   output$rain_sub <- renderUI({
+    
+    req(input$station)
+    
+    if (input$station == "mare") {
+      df <- get_kpi_day_data("tb_estacao_3", 35)
+    } else {
+      df <- get_kpi_day_data(input$station, 35)
+    }
+    
+    if (nrow(df) == 0) {
+      return(
+        tagList(
+          "Sem dados disponíveis",
+          tags$br(),
+          tags$br(),
+          station_nm()
+        )
+      )
+    }
+    
+    rain_total <- sum(df$value, na.rm = TRUE)
+    
     tagList(
-      station_nm(),
+      paste0("Chuva acumulada: ", format_kpi_value(rain_total, "mm")),
       tags$br(),
-      formatted_time()
+      paste0("Atualizado: ", get_latest_time(df)),
+      tags$br(),
+      tags$br()
     )
   })
-
-  # Pressure
-  output$pressure_sub <- renderUI({
-    tagList(
-      station_nm(),
-      tags$br(),
-      formatted_time()
-    )
+  
+  # Third KPI subtitle: Pressure for Merajuba, Air Quality for Mare
+  output$third_kpi_sub <- renderUI({
+    
+    req(input$station)
+    
+    if (input$station == "mare") {
+      
+      tagList()
+      
+    } else {
+      
+      df <- get_kpi_day_data(input$station, 23)
+      
+      if (nrow(df) == 0) {
+        return(
+          tagList(
+            "Sem dados disponíveis",
+            tags$br(),
+            tags$br(),
+            station_nm()
+          )
+        )
+      }
+      
+      min_value <- min(df$value, na.rm = TRUE)
+      max_value <- max(df$value, na.rm = TRUE)
+      
+      tagList(
+        paste0("Mín.: ", format_kpi_value(min_value, "hPa")),
+        tags$br(),
+        paste0("Máx.: ", format_kpi_value(max_value, "hPa")),
+        tags$br(),
+        paste0("Atualizado: ", get_latest_time(df)),
+        tags$br(),
+        tags$br()
+      )
+    }
   })
-
+  
   # Wind
   output$wind_sub <- renderUI({
+    
+    req(input$station)
+    
+    if (input$station == "mare") {
+      wind_df <- get_kpi_day_data("tb_estacao_3", c(36, 347))
+      gust_df <- get_kpi_day_data("tb_estacao_3", c(37, 348))
+    } else {
+      wind_df <- get_kpi_day_data(input$station, c(36, 347))
+      gust_df <- get_kpi_day_data(input$station, c(37, 348))
+    }
+    
+    if (nrow(wind_df) == 0) {
+      return(
+        tagList(
+          "Sem dados disponíveis",
+          tags$br(),
+          tags$br(),
+          station_nm()
+        )
+      )
+    }
+    
+    gust_max <- if (nrow(gust_df) == 0) {
+      NA_real_
+    } else {
+      max(gust_df$value, na.rm = TRUE)
+    }
+    
     tagList(
-      station_nm(),
+      paste0("Rajada máx.: ", format_kpi_value(gust_max, "km/h")),
       tags$br(),
-      formatted_time()
+      paste0("Atualizado: ", get_latest_time(wind_df)),
+      tags$br(),
+      tags$br()
     )
   })
-
-  # Render MAIN charts -----------------------------------
-
+  
+  # (UPDATED 23.06.26) Render MAIN charts -----------------------------------
+  
   output$sensor_plot <- renderPlotly({
+    
     # Input reactive conditional logic for outputs
     req(input$sensor)
-
-    # Logic to avoid empty plot when no data
-    df_all <- sensor_data() |> ## Execute sensor_data block code and pass it to a df
-      dplyr::distinct(sensor, time, .keep_all = TRUE) ## Keep only 1 row for each sensor and time
-
-    req(nrow(df_all) > 0) ## Run code only if there any rows on df
+    
+    # Get selected plot data prepared for both chart and CSV download
+    plot_data <- selected_sensor_data()
+    
+    df <- plot_data$df
+    plot_title <- plot_data$plot_title
+    unit_label <- plot_data$unit_label
+    
+    # Show friendly empty plot when selected sensor has no data in selected period
+    if (nrow(df) == 0) {
+      
+      empty_title <- paste0(station_nm(), "<br>", plot_title)
+      
+      return(
+        plotly::plot_ly() |>
+          plotly::layout(
+            title = list(
+              text = empty_title,
+              font = list(size = 11),
+              x = 0.5,
+              xanchor = "center"
+            ),
+            xaxis = list(
+              title = "",
+              showgrid = FALSE,
+              zeroline = FALSE,
+              showticklabels = FALSE
+            ),
+            yaxis = list(
+              title = "",
+              showgrid = FALSE,
+              zeroline = FALSE,
+              showticklabels = FALSE
+            ),
+            annotations = list(
+              list(
+                text = "Sem dados disponíveis<br>para este indicador<br>no período selecionado.",
+                x = 0.5,
+                y = 0.55,
+                xref = "paper",
+                yref = "paper",
+                showarrow = FALSE,
+                align = "center",
+                font = list(
+                  size = 12,
+                  color = "#6c757d"
+                )
+              )
+            ),
+            margin = list(l = 8, r = 8, t = 80, b = 35)
+          )
+      )
+    }
     
     # Get active sensor metadata from reactive expression
     meta <- sensor_meta()
-
+    
     # Get selected sensor
     selected <- input$sensor
-
-    # Conditional statement to get sensor labels --------------------------
-    if (startsWith(selected, "cat_")) {
-      # Get category name
-      category_name <- sub("cat_", "", selected) ## remove category prefix
-
-      # GEt sensors and units from the category
-      sensor_ids <- meta$categories[[category_name]]$ids ## take categories names
-      unit_label <- meta$categories[[category_name]]$unit ## take categories units
-
-      # From all sensor data, picks ONLY the ones that are in category list and makes them integer
-      df <- df_all |>
-        dplyr::filter(sensor %in% as.integer(sensor_ids)) ## OBS. Nao esquecer converter para integer!
-
-      # Define plot title as category name
-      plot_title <- category_name
-
-      # ELSE block for when missing sensors are selected
-    } else {
-      # Picks selected sensor
-      df <- df_all |>
-        dplyr::filter(sensor == as.integer(selected))
-
-      # Define title dynamically using sensor naming labels dictionary
-      plot_title <- if (selected %in% names(meta$labels)) {
-        meta$labels[selected] ## for listed sensors
-      } else {
-        paste("Sensor", selected) ## for missing sensors
-      }
-      unit_label <- "" ## Leaves empty (for now)
-    }
-
+    
     # Placeholder plot to allow loop over sensors
     p <- plotly::plot_ly()
-
+    
     # Plot charts ---------------------------------------------------------------------
-
+    
     # Loop over sensors to get plotting config and plot charts
     for (sid in unique(df$sensor)) {
+      
       sid_char <- as.character(sid) ## match string format of dictionary labels
       config <- meta$config[[sid_char]] ## get plot config from dictionary (sensor_config) - chart type, color, etc.
+      
       if (is.null(config)) {
         config <- meta$config[["default"]]
       } ## use default plot config for missing/new sensors
-
+      
       # Conditional logic for sensor naming
       sensor_name <- if (sid_char %in% names(meta$labels)) {
         meta$labels[sid_char] ## use label from dictionary (sensor_labels)
       } else {
-        paste("Sensor", sid_char) ## use "Sensor"  as label
+        paste("Sensor", sid_char) ## use "Sensor" as label
       }
-
+      
       # Build the plot object
       p <- p |>
         plotly::add_trace(
@@ -716,24 +1426,20 @@ server <- function(input, output, session) {
           mode = config$mode,
           name = sensor_name,
           line = list(color = config$color),
-          text = ~ paste0(
-            "Hora: ",
-            format(time, "%H:%M"),
-            "h",
-            "<br>Valor: ",
-            value,
-            " ",
-            unit_label
+          text = ~paste0(
+            "Hora: ", format(time, "%H:%M"), "h",
+            "<br>Valor: ", value, " ", unit_label
           ),
           hoverinfo = "text",
           textposition = "none" ## Removes hover text from bar charts
         ) ## OBS. add_trace() method permite plotar different chart types on the same graph
     }
-
+    
     # Special config for UV sensor plotting ----------------------------------------------------
-
+    
     # Add background shapes ("risk bands") to the plot when UV selected
     if (selected == "19" || selected == "cat_UV") {
+      
       p <- p |>
         layout(
           shapes = list(
@@ -784,11 +1490,16 @@ server <- function(input, output, session) {
           )
         )
     }
-
+    
     # Final plot layout that will rendered ------------------------------------------------------
     p |>
       layout(
-        title = paste(station_nm(), "|", plot_title),
+        title = list(
+          text = paste0(station_nm(), "<br>", plot_title),
+          font = list(size = 13),
+          x = 0.5,
+          xanchor = "center"
+        ),
         xaxis = list(
           title = "Hora",
           tickformat = "%H:%M\n%b %d"
@@ -797,14 +1508,113 @@ server <- function(input, output, session) {
           title = "", ## Remove title for now
           automargin = TRUE
         ),
-
+        
         legend = list(
           orientation = "h", ## place legend text horizontal
           x = 0,
-          y = -0.25 ## place legend bellow and to the left of plotting area
+          y = -0.25 ## place legend below and to the left of plotting area
         ),
-
-        margin = list(l = 70, r = 20, t = 60, b = 80) ## b=80 to add more space
+        
+        margin = list(l = 70, r = 20, t = 80, b = 80) ## b=80 to add more space; t=80 to fit two-line title
       )
   })
+  
+  # (CREATED 23.06.26) DONLOAD DATA PIPELINE ---------------------------------
+  
+  # Prepare selected data for plot and CSV download
+  selected_sensor_data <- reactive({
+    
+    req(input$sensor)
+    
+    df_all <- sensor_data() |>
+      dplyr::distinct(sensor, time, .keep_all = TRUE)
+    
+    #req(nrow(df_all) > 0) ##UPDATED
+    ## Removing this line allows the code to continue even when `df_all` is empty. 
+    ##This way,`renderPlotly()` can reach our `if (nrow(df) == 0)` check and display a user-friendly message instead of appearing blank.
+    
+    meta <- sensor_meta()
+    selected <- input$sensor
+    
+    if (startsWith(selected, "cat_")) {
+      
+      category_name <- sub("cat_", "", selected)
+      
+      sensor_ids <- meta$categories[[category_name]]$ids
+      unit_label <- meta$categories[[category_name]]$unit
+      
+      df <- df_all |>
+        dplyr::filter(sensor %in% as.integer(sensor_ids))
+      
+      plot_title <- category_name
+      
+    } else {
+      
+      df <- df_all |>
+        dplyr::filter(sensor == as.integer(selected))
+      
+      plot_title <- if (selected %in% names(meta$labels)) {
+        meta$labels[selected]
+      } else {
+        paste("Sensor", selected)
+      }
+      
+      unit_label <- ""
+    }
+    
+    list(
+      df = df,
+      plot_title = plot_title,
+      unit_label = unit_label
+    )
+  }) 
+  
+  # Download btn handler -----------------------------------------
+  
+  # Download CSV with the same data shown in the main plot
+  output$download_sensor_csv <- downloadHandler(
+    
+    filename = function() {
+      
+      start_date <- as.Date(input$selected_date[1])
+      end_date   <- as.Date(input$selected_date[2])
+      
+      paste0(
+        "dados_",
+        input$station,
+        "_",
+        input$sensor,
+        "_",
+        start_date,
+        "_",
+        end_date,
+        ".csv"
+      )
+    },
+    
+    content = function(file) {
+      
+      plot_data <- selected_sensor_data()
+      
+      df_download <- plot_data$df |>
+        dplyr::mutate(
+          estacao = station_nm(),
+          indicador = plot_data$plot_title
+        ) |>
+        dplyr::select(
+          estacao,
+          indicador,
+          sensor,
+          time,
+          value
+        )
+      
+      write.csv(
+        df_download,
+        file,
+        row.names = FALSE,
+        fileEncoding = "UTF-8"
+      )
+    }
+  ) 
 }
