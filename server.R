@@ -387,7 +387,13 @@ server <- function(input, output, session) {
         )
       )
       
+      # (UPDATED 18.07.26)
       if (nrow(df) > 0) {
+        
+        # Keep original date from queried timestamp for daily statistics
+        # This avoids grouping rain data into the previous day after timezone adjustment
+        df$stats_date <- as.Date(df$time)
+        
         df$table_name <- table_name
         df_all <- dplyr::bind_rows(df_all, df)
       }
@@ -470,30 +476,29 @@ server <- function(input, output, session) {
     )
   })
   
-  # Helpers - Statistics tab
-  get_stats_sensor_label <- reactive({
+  # (UPDATED 18.07.2026) Helpers - Statistics tab
+  
+  # Return the user-facing label for any sensor ID
+  get_sensor_label_by_id <- function(sensor_id) {
     
-    req(input$stats_sensor)
-    
-    sensor_id <- as.character(input$stats_sensor)
+    sensor_id <- as.character(sensor_id)
     
     if (sensor_id %in% names(sensor_labels)) {
-      return(sensor_labels[sensor_id])
+      return(unname(sensor_labels[sensor_id]))
     }
     
     if (sensor_id %in% names(airQuality_labels)) {
-      return(airQuality_labels[sensor_id])
+      return(unname(airQuality_labels[sensor_id]))
     }
     
     paste("Sensor", sensor_id)
-  })
+  }
   
-  get_stats_sensor_unit <- reactive({
+  # Return the measurement unit for any sensor ID
+  get_sensor_unit_by_id <- function(sensor_id) {
     
-    req(input$stats_sensor)
-    
-    sensor_id <- as.character(input$stats_sensor)
-    sensor_label <- get_stats_sensor_label()
+    sensor_id <- as.character(sensor_id)
+    sensor_label <- get_sensor_label_by_id(sensor_id)
     
     # Air quality sensors
     if (sensor_id %in% c("71", "72")) {
@@ -512,6 +517,22 @@ server <- function(input, output, session) {
     }
     
     ""
+  }
+  
+  # Label for the sensor currently selected in the Statistics tab
+  get_stats_sensor_label <- reactive({
+    
+    req(input$stats_sensor)
+    
+    get_sensor_label_by_id(input$stats_sensor)
+  })
+  
+  # Unit for the sensor currently selected in the Statistics tab
+  get_stats_sensor_unit <- reactive({
+    
+    req(input$stats_sensor)
+    
+    get_sensor_unit_by_id(input$stats_sensor)
   })
   
   format_stats_value <- function(value, unit = "", digits = 1) {
@@ -528,6 +549,718 @@ server <- function(input, output, session) {
     
     paste(value, unit)
   }
+  
+  # (UPDATED 18.07.2026)
+  # Monthly data for all sensors of the selected station ---------------------
+  
+  stats_month_station_data <- reactive({
+    
+    req(input$stats_station, input$stats_base_date)
+    req(!is.na(input$stats_base_date))
+    
+    station_tables <- get_station_tables(input$stats_station)
+    
+    month_start <- lubridate::floor_date(
+      as.Date(input$stats_base_date),
+      unit = "month"
+    )
+    
+    month_end <- lubridate::ceiling_date(
+      month_start,
+      unit = "month"
+    )
+    
+    start_time <- as.POSIXct(month_start)
+    end_time   <- as.POSIXct(month_end)
+    
+    # Follow the same sensor availability rule used by the Statistics tab
+    allowed_labels <- sensor_labels
+    
+    if (input$stats_station == "mare") {
+      allowed_labels <- c(
+        sensor_labels,
+        airQuality_labels
+      )
+    }
+    
+    allowed_sensor_ids <- as.integer(names(allowed_labels))
+    
+    sensor_summary_list <- list()
+    rain_daily_list <- list()
+    
+    for (table_name in station_tables) {
+      
+      table_excluded <- excluded_by_table[[table_name]]
+      
+      if (is.null(table_excluded)) {
+        table_excluded <- character(0)
+      }
+      
+      excluded_ids <- as.integer(
+        c(
+          excluded_global,
+          table_excluded
+        )
+      )
+      
+      valid_sensor_ids <- setdiff(
+        allowed_sensor_ids,
+        excluded_ids
+      )
+      
+      if (length(valid_sensor_ids) == 0) {
+        next
+      }
+      
+      table_sql <- as.character(
+        DBI::dbQuoteIdentifier(
+          con,
+          DBI::Id(
+            schema = schema,
+            table = table_name
+          )
+        )
+      )
+      
+      start_sql <- as.character(
+        DBI::dbQuoteString(
+          con,
+          format(start_time, "%Y-%m-%d %H:%M:%S")
+        )
+      )
+      
+      end_sql <- as.character(
+        DBI::dbQuoteString(
+          con,
+          format(end_time, "%Y-%m-%d %H:%M:%S")
+        )
+      )
+      
+      sensor_ids_sql <- paste(
+        valid_sensor_ids,
+        collapse = ", "
+      )
+      
+      # Aggregate statistics and identify the first timestamp
+      # associated with the minimum and maximum values
+      summary_sql <- paste0(
+        "WITH ranked AS (
+           
+           SELECT
+             sensor,
+             time,
+             value,
+             
+             ROW_NUMBER() OVER (
+               PARTITION BY sensor
+               ORDER BY value ASC, time ASC
+             ) AS min_rank,
+             
+             ROW_NUMBER() OVER (
+               PARTITION BY sensor
+               ORDER BY value DESC, time ASC
+             ) AS max_rank,
+             
+             AVG(value) OVER (
+               PARTITION BY sensor
+             ) AS avg_value,
+             
+             COUNT(value) OVER (
+               PARTITION BY sensor
+             ) AS n_records
+           
+           FROM ", table_sql, "
+           
+           WHERE time >= ", start_sql, "
+             AND time < ", end_sql, "
+             AND sensor IN (", sensor_ids_sql, ")
+             AND value IS NOT NULL
+         )
+         
+         SELECT
+           sensor,
+           
+           MAX(
+             CASE
+               WHEN min_rank = 1 THEN value
+             END
+           ) AS min_value,
+           
+           MAX(
+             CASE
+               WHEN min_rank = 1 THEN time
+             END
+           ) AS min_time,
+           
+           MAX(
+             CASE
+               WHEN max_rank = 1 THEN value
+             END
+           ) AS max_value,
+           
+           MAX(
+             CASE
+               WHEN max_rank = 1 THEN time
+             END
+           ) AS max_time,
+           
+           MAX(avg_value) AS avg_value,
+           MAX(n_records) AS n_records
+         
+         FROM ranked
+         
+         GROUP BY sensor
+         ORDER BY sensor"
+      )
+      
+      table_summary <- DBI::dbGetQuery(
+        con,
+        summary_sql
+      )
+      
+      if (nrow(table_summary) > 0) {
+        
+        # Follow the same time adjustment used by the dashboard
+        table_summary$min_time <- as.POSIXct(
+          table_summary$min_time,
+          tz = "UTC"
+        ) - lubridate::hours(3)
+        
+        table_summary$max_time <- as.POSIXct(
+          table_summary$max_time,
+          tz = "UTC"
+        ) - lubridate::hours(3)
+        
+        table_summary$table_name <- table_name
+        
+        sensor_summary_list[[table_name]] <- table_summary
+      }
+      
+      # Rain requires daily totals instead of raw-reading statistics
+      if (35L %in% valid_sensor_ids) {
+        
+        rain_sql <- paste0(
+          "SELECT
+             CAST(time AS DATE) AS date,
+             SUM(value) AS daily_total,
+             COUNT(value) AS n_records
+           FROM ", table_sql, "
+           WHERE time >= ", start_sql, "
+             AND time < ", end_sql, "
+             AND sensor = 35
+             AND value IS NOT NULL
+           GROUP BY CAST(time AS DATE)
+           ORDER BY date"
+        )
+        
+        rain_daily <- DBI::dbGetQuery(
+          con,
+          rain_sql
+        )
+        
+        if (nrow(rain_daily) > 0) {
+          
+          rain_daily$table_name <- table_name
+          
+          rain_daily_list[[table_name]] <- rain_daily
+        }
+      }
+    }
+    
+    # Combine sensor summaries from all real tables
+    sensor_summary_raw <- dplyr::bind_rows(
+      sensor_summary_list
+    )
+    
+    if (nrow(sensor_summary_raw) == 0) {
+      
+      sensor_summary_raw <- data.frame(
+        sensor = integer(),
+        min_value = numeric(),
+        min_time = as.POSIXct(
+          character(),
+          tz = "UTC"
+        ),
+        max_value = numeric(),
+        max_time = as.POSIXct(
+          character(),
+          tz = "UTC"
+        ),
+        avg_value = numeric(),
+        n_records = numeric()
+      )
+      
+    } else {
+      
+      sensor_summary_raw <- sensor_summary_raw |>
+        dplyr::mutate(
+          sensor = as.integer(sensor),
+          min_value = as.numeric(min_value),
+          min_time = as.POSIXct(
+            min_time,
+            tz = "UTC"
+          ),
+          max_value = as.numeric(max_value),
+          max_time = as.POSIXct(
+            max_time,
+            tz = "UTC"
+          ),
+          avg_value = as.numeric(avg_value),
+          n_records = as.numeric(n_records)
+        )
+      
+      # Select the global minimum and its corresponding timestamp
+      minimum_rows <- sensor_summary_raw |>
+        dplyr::arrange(
+          sensor,
+          min_value,
+          min_time
+        ) |>
+        dplyr::group_by(sensor) |>
+        dplyr::slice_head(n = 1) |>
+        dplyr::ungroup() |>
+        dplyr::select(
+          sensor,
+          min_value,
+          min_time
+        )
+      
+      # Select the global maximum and its corresponding timestamp
+      maximum_rows <- sensor_summary_raw |>
+        dplyr::arrange(
+          sensor,
+          dplyr::desc(max_value),
+          max_time
+        ) |>
+        dplyr::group_by(sensor) |>
+        dplyr::slice_head(n = 1) |>
+        dplyr::ungroup() |>
+        dplyr::select(
+          sensor,
+          max_value,
+          max_time
+        )
+      
+      # Calculate the weighted average and the total record count
+      average_rows <- sensor_summary_raw |>
+        dplyr::group_by(sensor) |>
+        dplyr::summarise(
+          avg_value = sum(
+            avg_value * n_records,
+            na.rm = TRUE
+          ) / sum(
+            n_records,
+            na.rm = TRUE
+          ),
+          
+          n_records = sum(
+            n_records,
+            na.rm = TRUE
+          ),
+          
+          .groups = "drop"
+        )
+      
+      sensor_summary_raw <- average_rows |>
+        dplyr::left_join(
+          minimum_rows,
+          by = "sensor"
+        ) |>
+        dplyr::left_join(
+          maximum_rows,
+          by = "sensor"
+        ) |>
+        dplyr::select(
+          sensor,
+          min_value,
+          min_time,
+          max_value,
+          max_time,
+          avg_value,
+          n_records
+        ) |>
+        dplyr::arrange(sensor)
+    }
+    
+    # Combine daily rain totals from all real tables
+    rain_daily <- dplyr::bind_rows(
+      rain_daily_list
+    )
+    
+    if (nrow(rain_daily) == 0) {
+      
+      rain_daily <- data.frame(
+        date = as.Date(character()),
+        daily_total = numeric(),
+        n_records = numeric()
+      )
+      
+    } else {
+      
+      rain_daily <- rain_daily |>
+        dplyr::mutate(
+          date = as.Date(date),
+          daily_total = as.numeric(daily_total),
+          n_records = as.numeric(n_records)
+        ) |>
+        dplyr::group_by(date) |>
+        dplyr::summarise(
+          daily_total = sum(
+            daily_total,
+            na.rm = TRUE
+          ),
+          n_records = sum(
+            n_records,
+            na.rm = TRUE
+          ),
+          .groups = "drop"
+        ) |>
+        dplyr::arrange(date)
+    }
+    
+    list(
+      sensor_summary_raw = sensor_summary_raw,
+      rain_daily = rain_daily,
+      month_start = month_start,
+      month_end = month_end - lubridate::days(1)
+    )
+  })
+  
+  # (UPDATED 18.07.2026)
+  # Prepare the monthly report for all station sensors -----------------------
+  
+  stats_month_report_data <- reactive({
+    
+    monthly_data <- stats_month_station_data()
+    
+    sensor_summary_raw <- monthly_data$sensor_summary_raw
+    rain_daily <- monthly_data$rain_daily
+    
+    period_label <- paste0(
+      format(
+        monthly_data$month_start,
+        "%d-%m-%Y"
+      ),
+      " até ",
+      format(
+        monthly_data$month_end,
+        "%d-%m-%Y"
+      )
+    )
+    
+    format_record_count <- function(value) {
+      
+      format(
+        round(as.numeric(value)),
+        big.mark = ".",
+        decimal.mark = ",",
+        scientific = FALSE,
+        trim = TRUE
+      )
+    }
+    
+    # Format the date and time of an extreme record
+    format_record_datetime <- function(value) {
+      
+      if (
+        length(value) == 0 ||
+        is.na(value[1])
+      ) {
+        return("—")
+      }
+      
+      format(
+        value[1],
+        "%d-%m-%Y %H:%M",
+        tz = "UTC"
+      )
+    }
+    
+    # Common sensors
+    # Rain is removed because it uses daily accumulated values
+    common_sensors <- sensor_summary_raw |>
+      dplyr::filter(sensor != 35L) |>
+      dplyr::mutate(
+        sensor_name = vapply(
+          as.character(sensor),
+          get_sensor_label_by_id,
+          character(1)
+        )
+      ) |>
+      dplyr::arrange(
+        sensor_name,
+        sensor
+      )
+    
+    if (nrow(common_sensors) == 0) {
+      
+      sensor_summary <- data.frame(
+        Sensor = character(),
+        Código = character(),
+        Mínimo = character(),
+        Máximo = character(),
+        Média = character(),
+        `Número de medições` = character(),
+        check.names = FALSE
+      )
+      
+      sensor_details <- list()
+      
+    } else {
+      
+      # Compact summary table
+      sensor_rows <- lapply(
+        seq_len(nrow(common_sensors)),
+        function(i) {
+          
+          sensor_id <- as.character(
+            common_sensors$sensor[i]
+          )
+          
+          unit <- get_sensor_unit_by_id(
+            sensor_id
+          )
+          
+          data.frame(
+            Sensor = common_sensors$sensor_name[i],
+            
+            Código = sensor_id,
+            
+            Mínimo = format_stats_value(
+              common_sensors$min_value[i],
+              unit
+            ),
+            
+            Máximo = format_stats_value(
+              common_sensors$max_value[i],
+              unit
+            ),
+            
+            Média = format_stats_value(
+              common_sensors$avg_value[i],
+              unit
+            ),
+            
+            `Número de medições` = format_record_count(
+              common_sensors$n_records[i]
+            ),
+            
+            check.names = FALSE
+          )
+        }
+      )
+      
+      sensor_summary <- dplyr::bind_rows(
+        sensor_rows
+      )
+      
+      # Individual detail table for each sensor
+      sensor_details <- lapply(
+        seq_len(nrow(common_sensors)),
+        function(i) {
+          
+          sensor_id <- as.character(
+            common_sensors$sensor[i]
+          )
+          
+          sensor_name <- common_sensors$sensor_name[i]
+          
+          unit <- get_sensor_unit_by_id(
+            sensor_id
+          )
+          
+          list(
+            title = paste0(
+              sensor_name
+            ),
+            
+            table = data.frame(
+              Métrica = c(
+                "Mínimo",
+                "Máximo",
+                "Média",
+                "Número de medições"
+              ),
+              
+              Valor = c(
+                format_stats_value(
+                  common_sensors$min_value[i],
+                  unit
+                ),
+                
+                format_stats_value(
+                  common_sensors$max_value[i],
+                  unit
+                ),
+                
+                format_stats_value(
+                  common_sensors$avg_value[i],
+                  unit
+                ),
+                
+                format_record_count(
+                  common_sensors$n_records[i]
+                )
+              ),
+              
+              `Data e hora` = c(
+                format_record_datetime(
+                  common_sensors$min_time[i]
+                ),
+                
+                format_record_datetime(
+                  common_sensors$max_time[i]
+                ),
+                
+                "—",
+                "—"
+              ),
+              
+              check.names = FALSE
+            )
+          )
+        }
+      )
+    }
+    
+    # Rain statistics
+    if (nrow(rain_daily) == 0) {
+      
+      rain_summary <- data.frame(
+        Métrica = character(),
+        Valor = character(),
+        Data = character(),
+        check.names = FALSE
+      )
+      
+      rain_daily_table <- data.frame(
+        Data = character(),
+        `Acumulado diário` = character(),
+        Medições = character(),
+        check.names = FALSE
+      )
+      
+    } else {
+      
+      rain_unit <- get_sensor_unit_by_id("35")
+      
+      min_idx <- which.min(
+        rain_daily$daily_total
+      )
+      
+      max_idx <- which.max(
+        rain_daily$daily_total
+      )
+      
+      rain_summary <- data.frame(
+        Métrica = c(
+          "Chuva acumulada no mês",
+          "Menor acumulado diário entre os dias com dados",
+          "Maior acumulado diário",
+          "Média diária acumulada entre os dias com dados",
+          "Dias com dados",
+          "Número de medições"
+        ),
+        Valor = c(
+          format_stats_value(
+            sum(
+              rain_daily$daily_total,
+              na.rm = TRUE
+            ),
+            rain_unit
+          ),
+          format_stats_value(
+            rain_daily$daily_total[min_idx],
+            rain_unit
+          ),
+          format_stats_value(
+            rain_daily$daily_total[max_idx],
+            rain_unit
+          ),
+          format_stats_value(
+            mean(
+              rain_daily$daily_total,
+              na.rm = TRUE
+            ),
+            rain_unit
+          ),
+          as.character(nrow(rain_daily)),
+          format_record_count(
+            sum(
+              rain_daily$n_records,
+              na.rm = TRUE
+            )
+          )
+        ),
+        Data = c(
+          "-",
+          format(
+            rain_daily$date[min_idx],
+            "%d-%m-%Y"
+          ),
+          format(
+            rain_daily$date[max_idx],
+            "%d-%m-%Y"
+          ),
+          "-",
+          "-",
+          "-"
+        ),
+        check.names = FALSE
+      )
+      
+      rain_daily_table <- rain_daily |>
+        dplyr::transmute(
+          Data = format(
+            date,
+            "%d-%m-%Y"
+          ),
+          `Acumulado diário` = paste0(
+            round(daily_total, 1),
+            " ",
+            rain_unit
+          ),
+          Medições = vapply(
+            n_records,
+            format_record_count,
+            character(1)
+          )
+        )
+    }
+    
+    list(
+      sensor_summary = sensor_summary,
+      sensor_details = sensor_details,
+      rain_summary = rain_summary,
+      rain_daily = rain_daily_table,
+      period_label = period_label
+    )
+  })
+  
+  # (UPDATED 18.07.2026)
+  # Aggregate daily rain data - Statistics tab
+  stats_daily_rain_data <- reactive({
+    
+    df <- stats_sensor_data()
+    
+    if (nrow(df) == 0) {
+      return(data.frame(
+        date = as.Date(character()),
+        daily_total = numeric()
+      ))
+    }
+    
+    df |>
+      dplyr::mutate(
+        date = stats_date
+      ) |>
+      dplyr::group_by(date) |>
+      dplyr::summarise(
+        daily_total = sum(value, na.rm = TRUE),
+        .groups = "drop"
+      ) |>
+      dplyr::arrange(date)
+  })
   
   # Outputs - Statistics tab
   output$stats_summary_title <- renderUI({
@@ -553,6 +1286,7 @@ server <- function(input, output, session) {
     )
   })
   
+  # (UPDATED 18.07.2026)
   output$stats_min_value <- renderUI({
     
     df <- stats_sensor_data()
@@ -565,23 +1299,55 @@ server <- function(input, output, session) {
     sensor_label <- get_stats_sensor_label()
     
     if (grepl("Chuva", sensor_label, ignore.case = TRUE)) {
-      return(format_stats_value(sum(df$value, na.rm = TRUE), unit))
+      
+      if (input$stats_period == "day") {
+        return(format_stats_value(sum(df$value, na.rm = TRUE), unit))
+      }
+      
+      rain_daily <- stats_daily_rain_data()
+      
+      if (nrow(rain_daily) == 0) {
+        return("—")
+      }
+      
+      return(format_stats_value(min(rain_daily$daily_total, na.rm = TRUE), unit))
     }
     
     format_stats_value(min(df$value, na.rm = TRUE), unit)
   })
   
+  # (UPDATED 18.07.2026)
   output$stats_min_sub <- renderUI({
     
     sensor_label <- get_stats_sensor_label()
     
     if (grepl("Chuva", sensor_label, ignore.case = TRUE)) {
-      return("Chuva acumulada no período")
+      
+      if (input$stats_period == "day") {
+        return("Chuva acumulada no dia")
+      }
+      
+      rain_daily <- stats_daily_rain_data()
+      
+      if (nrow(rain_daily) == 0) {
+        return("Menor acumulado diário")
+      }
+      
+      min_idx <- which.min(rain_daily$daily_total)
+      
+      return(
+        tagList(
+          "Menor acumulado diário",
+          tags$br(),
+          format(rain_daily$date[min_idx], "%d-%m-%Y")
+        )
+      )
     }
     
     "Valor mínimo"
   })
   
+  # (UPDATED 18.07.2026)
   output$stats_max_value <- renderUI({
     
     df <- stats_sensor_data()
@@ -591,9 +1357,27 @@ server <- function(input, output, session) {
       return("—")
     }
     
+    sensor_label <- get_stats_sensor_label()
+    
+    if (grepl("Chuva", sensor_label, ignore.case = TRUE)) {
+      
+      if (input$stats_period == "day") {
+        return(format_stats_value(max(df$value, na.rm = TRUE), unit))
+      }
+      
+      rain_daily <- stats_daily_rain_data()
+      
+      if (nrow(rain_daily) == 0) {
+        return("—")
+      }
+      
+      return(format_stats_value(max(rain_daily$daily_total, na.rm = TRUE), unit))
+    }
+    
     format_stats_value(max(df$value, na.rm = TRUE), unit)
   })
   
+  # (UPDATED 18.07.2026)
   output$stats_max_sub <- renderUI({
     
     sensor_label <- get_stats_sensor_label()
@@ -603,12 +1387,32 @@ server <- function(input, output, session) {
     }
     
     if (grepl("Chuva", sensor_label, ignore.case = TRUE)) {
-      return("Maior leitura")
+      
+      if (input$stats_period == "day") {
+        return("Maior leitura no dia")
+      }
+      
+      rain_daily <- stats_daily_rain_data()
+      
+      if (nrow(rain_daily) == 0) {
+        return("Maior acumulado diário")
+      }
+      
+      max_idx <- which.max(rain_daily$daily_total)
+      
+      return(
+        tagList(
+          "Maior acumulado diário",
+          tags$br(),
+          format(rain_daily$date[max_idx], "%d-%m-%Y")
+        )
+      )
     }
     
     "Valor máximo"
   })
   
+  # (UPDATED 18.07.2026)
   output$stats_avg_value <- renderUI({
     
     df <- stats_sensor_data()
@@ -618,15 +1422,38 @@ server <- function(input, output, session) {
       return("—")
     }
     
+    sensor_label <- get_stats_sensor_label()
+    
+    if (grepl("Chuva", sensor_label, ignore.case = TRUE)) {
+      
+      if (input$stats_period == "day") {
+        return(format_stats_value(mean(df$value, na.rm = TRUE), unit))
+      }
+      
+      rain_daily <- stats_daily_rain_data()
+      
+      if (nrow(rain_daily) == 0) {
+        return("—")
+      }
+      
+      return(format_stats_value(mean(rain_daily$daily_total, na.rm = TRUE), unit))
+    }
+    
     format_stats_value(mean(df$value, na.rm = TRUE), unit)
   })
   
+  # (UPDATED 18.07.2026)
   output$stats_avg_sub <- renderUI({
     
     sensor_label <- get_stats_sensor_label()
     
     if (grepl("Chuva", sensor_label, ignore.case = TRUE)) {
-      return("Média das leituras")
+      
+      if (input$stats_period == "day") {
+        return("Média das leituras")
+      }
+      
+      return("Média diária acumulada")
     }
     
     if (grepl("Vento|Rajada", sensor_label, ignore.case = TRUE)) {
@@ -820,6 +1647,45 @@ server <- function(input, output, session) {
     )
     
   }, ignoreInit = TRUE) ## OBS. NAO ESQUECER: ignoreInit = TRUE → Run code ONLY when the user changes the input
+  
+  # (UPDATED 18.07.26) Limit selected date range to avoid querying too much data ----------------
+  
+  # Maximum number of days allowed in the main chart date range
+  max_selected_days <- 14
+  
+  observeEvent(input$selected_date, {
+    
+    req(input$selected_date)
+    req(!is.na(input$selected_date[1]), !is.na(input$selected_date[2]))
+    
+    start_date <- as.Date(input$selected_date[1])
+    end_date   <- as.Date(input$selected_date[2])
+    
+    selected_days <- as.integer(end_date - start_date) + 1
+    
+    if (selected_days > max_selected_days) {
+      
+      new_end_date <- start_date + lubridate::days(max_selected_days - 1)
+      
+      updateDateRangeInput(
+        session,
+        "selected_date",
+        start = start_date,
+        end   = new_end_date
+      )
+      
+      showNotification(
+        paste0(
+          "O período máximo permitido para visualização é de ",
+          max_selected_days,
+          " dias."
+        ),
+        type = "warning",
+        duration = 5
+      )
+    }
+    
+  }, ignoreInit = TRUE)
   
 
   # PREPARING DATA FOR PLOTING -----------------------------------------------
@@ -1592,19 +2458,26 @@ server <- function(input, output, session) {
       )
     },
     
+    # (UPDATED 18.07.26)
     content = function(file) {
       
       plot_data <- selected_sensor_data()
+      meta <- sensor_meta()
       
       df_download <- plot_data$df |>
         dplyr::mutate(
           estacao = station_nm(),
-          indicador = plot_data$plot_title
+          indicador = plot_data$plot_title,
+          variavel_climatica = dplyr::case_when(
+            as.character(sensor) %in% names(meta$labels) ~
+              unname(meta$labels[as.character(sensor)]),
+            TRUE ~ paste("Sensor", sensor)
+          )
         ) |>
         dplyr::select(
           estacao,
           indicador,
-          sensor,
+          variavel_climatica,
           time,
           value
         )
@@ -1616,5 +2489,248 @@ server <- function(input, output, session) {
         fileEncoding = "UTF-8"
       )
     }
-  ) 
+  )
+  
+  # Download monthly statistics report as PDF -------------------------------
+  
+  output$download_stats_monthly_report <- downloadHandler(
+    
+    filename = function() {
+      
+      req(input$stats_station)
+      req(input$stats_base_date)
+      
+      month_ref <- lubridate::floor_date(
+        as.Date(input$stats_base_date),
+        unit = "month"
+      )
+      
+      safe_station <- gsub(
+        "[^A-Za-z0-9_-]+",
+        "_",
+        input$stats_station
+      )
+      
+      paste0(
+        "relatorio_mensal_",
+        safe_station,
+        "_",
+        format(month_ref, "%Y_%m"),
+        ".pdf"
+      )
+    },
+    
+    contentType = "application/pdf",
+    
+    content = function(file) {
+      
+      req(input$stats_station)
+      req(input$stats_base_date)
+      
+      # Show a discreet message while the report is being generated
+      report_notification_id <- showNotification(
+        ui = "Preparando o relatório mensal para download...",
+        type = "message",
+        duration = NULL,
+        closeButton = FALSE,
+        session = session
+      )
+      
+      # Remove the notification when the download finishes or fails
+      on.exit(
+        removeNotification(
+          id = report_notification_id,
+          session = session
+        ),
+        add = TRUE
+      )
+      
+      message(
+        "Iniciando geração do relatório mensal da estação..."
+      )
+      
+      report_data <- stats_month_report_data()
+      
+      template_path <- file.path(
+        "reports",
+        "monthly_stats_report.qmd"
+      )
+      
+      if (!file.exists(template_path)) {
+        stop(
+          paste0(
+            "Template Quarto não encontrado: ",
+            template_path
+          )
+        )
+      }
+      
+      # Create a temporary directory for this report
+      tmp_dir <- tempfile(
+        "monthly_station_report_"
+      )
+      
+      dir.create(
+        tmp_dir,
+        recursive = TRUE,
+        showWarnings = FALSE
+      )
+      
+      # Remove temporary files after finishing the download
+      on.exit(
+        unlink(
+          tmp_dir,
+          recursive = TRUE,
+          force = TRUE
+        ),
+        add = TRUE
+      )
+      
+      # Copy the Quarto template
+      tmp_qmd <- file.path(
+        tmp_dir,
+        "monthly_stats_report.qmd"
+      )
+      
+      template_copied <- file.copy(
+        from = template_path,
+        to = tmp_qmd,
+        overwrite = TRUE
+      )
+      
+      if (!isTRUE(template_copied)) {
+        stop(
+          "Não foi possível copiar o template Quarto."
+        )
+      }
+      
+      station_name <- if (
+        input$stats_station %in% names(station_labels)
+      ) {
+        unname(
+          station_labels[input$stats_station]
+        )
+      } else {
+        input$stats_station
+      }
+      
+      # Prepare all report information as an R object
+      report_payload <- list(
+        station_name = station_name,
+        
+        period_label = report_data$period_label,
+        
+        generated_at = format(
+          Sys.time(),
+          "%d-%m-%Y %H:%M"
+        ),
+        
+        sensor_summary = report_data$sensor_summary,
+        
+        sensor_details = report_data$sensor_details,
+        
+        rain_summary = report_data$rain_summary
+      )
+      
+      report_data_file <- file.path(
+        tmp_dir,
+        "report_data.rds"
+      )
+      
+      saveRDS(
+        object = report_payload,
+        file = report_data_file
+      )
+      
+      if (!file.exists(report_data_file)) {
+        stop(
+          "Não foi possível criar o arquivo temporário de dados."
+        )
+      }
+      
+      output_pdf_name <- "relatorio_mensal_estacao.pdf"
+      
+      generated_pdf <- file.path(
+        tmp_dir,
+        output_pdf_name
+      )
+      
+      message(
+        "Diretório temporário: ",
+        normalizePath(
+          tmp_dir,
+          winslash = "/",
+          mustWork = TRUE
+        )
+      )
+      
+      message(
+        "Renderizando o documento Quarto..."
+      )
+      
+      tryCatch(
+        {
+          quarto::quarto_render(
+            input = normalizePath(
+              tmp_qmd,
+              winslash = "/",
+              mustWork = TRUE
+            ),
+            output_format = "pdf",
+            output_file = output_pdf_name,
+            execute_params = list(
+              data_file = normalizePath(
+                report_data_file,
+                winslash = "/",
+                mustWork = TRUE
+              )
+            ),
+            execute_dir = normalizePath(
+              tmp_dir,
+              winslash = "/",
+              mustWork = TRUE
+            ),
+            quiet = FALSE
+          )
+        },
+        error = function(e) {
+          
+          message(
+            "ERRO AO GERAR O RELATÓRIO PDF:"
+          )
+          
+          message(
+            conditionMessage(e)
+          )
+          
+          stop(e)
+        }
+      )
+      
+      if (!file.exists(generated_pdf)) {
+        stop(
+          paste0(
+            "O Quarto terminou, mas o PDF não foi encontrado em: ",
+            generated_pdf
+          )
+        )
+      }
+      
+      pdf_copied <- file.copy(
+        from = generated_pdf,
+        to = file,
+        overwrite = TRUE
+      )
+      
+      if (!isTRUE(pdf_copied)) {
+        stop(
+          "Não foi possível copiar o PDF para o download."
+        )
+      }
+      
+      message(
+        "Relatório mensal da estação gerado com sucesso."
+      )
+    }
+  )
 }
