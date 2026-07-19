@@ -1,0 +1,169 @@
+---
+title: "Relatório mensal da estação meteorológica"
+subtitle: "Painel de Estações — OCS/Fiocruz"
+format:
+  pdf:
+    toc: true
+    toc-title: "Sumário"
+    toc-depth: 2
+    number-sections: false
+    colorlinks: true
+    geometry:
+      - margin=2cm
+    keep-tex: false
+execute:
+  echo: false
+  warning: false
+  message: false
+params:
+  data_file: ""
+---
+
+```{r}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE
+)
+
+report <- readRDS(params$data_file)
+```
+
+**Estação monitorada:** `r report$station_name`
+
+**Período analisado:** `r report$period_label`
+
+**Relatório gerado em:** `r report$generated_at`
+
+## Visão geral do mês
+
+A tabela abaixo apresenta o menor valor (Mínimo), o maior valor (Máximo) e o valor médio (Média) registrado por cada sensor meteorológico durante o mês selecionado.
+
+```{r}
+#| results: asis
+
+if (
+  !is.null(report$sensor_summary) &&
+  nrow(report$sensor_summary) > 0
+) {
+
+  print(
+    knitr::kable(
+      report$sensor_summary,
+      format = "latex",
+      booktabs = TRUE,
+      longtable = TRUE,
+      row.names = FALSE,
+      align = c(
+        "l",
+        "c",
+        "r",
+        "r",
+        "r",
+        "r"
+      ),
+      caption = "Resumo dos registros da estação no mês",
+      linesep = ""
+    )
+  )
+
+} else {
+
+  cat(
+    "Não há registros disponíveis para esta estação no período selecionado."
+  )
+}
+```
+
+```{=latex}
+\newpage
+```
+
+## Informações por sensor
+
+Para cada sensor meteorológico, apresentamos o menor e o maior valor do mês, com a data e o horário em que foram registrados. Quando o mesmo valor ocorreu mais de uma vez, mostramos o primeiro registro.
+
+```{r}
+#| results: asis
+
+if (
+  !is.null(report$sensor_details) &&
+  length(report$sensor_details) > 0
+) {
+
+  for (sensor_detail in report$sensor_details) {
+
+    cat(
+      paste0(
+        "\n\n### ",
+        sensor_detail$title,
+        "\n\n"
+      )
+    )
+
+    cat(
+      knitr::kable(
+        sensor_detail$table,
+        format = "latex",
+        booktabs = TRUE,
+        longtable = TRUE,
+        row.names = FALSE,
+        align = c(
+          "l",
+          "r",
+          "c"
+        ),
+        linesep = ""
+      ),
+      sep = "\n"
+    )
+  }
+
+} else {
+
+  cat(
+    "Não foram encontrados dados para o período selecionado."
+  )
+}
+```
+
+```{=latex}
+\newpage
+```
+
+## Informações sobre a chuva
+
+Os valores de chuva são calculados a partir do total acumulado em cada dia. Dessa forma, o relatório apresenta o total do mês e permite identificar os dias com menor e maior volume de chuva.
+
+```{r}
+#| results: asis
+
+if (
+  !is.null(report$rain_summary) &&
+  nrow(report$rain_summary) > 0
+) {
+
+  print(
+    knitr::kable(
+      report$rain_summary,
+      format = "latex",
+      booktabs = TRUE,
+      longtable = FALSE,
+      row.names = FALSE,
+      align = c(
+        "l",
+        "r",
+        "c"
+      ),
+      caption = "Resumo da chuva no mês",
+      linesep = ""
+    )
+  )
+
+} else {
+
+  cat(
+    "Não foram encontrados dados para o período selecionado."
+  )
+}
+```
