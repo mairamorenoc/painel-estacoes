@@ -37,6 +37,8 @@ ui <- bslib::page_navbar(
       placement = "top"
     )
   ),
+  # (UPDATED 18.07.2026)
+  window_title = "Painel Estações | OCS/Fiocruz",
   
   # ui theme
   theme = bslib::bs_theme(
@@ -779,6 +781,13 @@ ui <- bslib::page_navbar(
           ),
           
           tags$br(),
+          
+          # (UPDATED 18.07.2026)
+          downloadButton(
+            outputId = "download_stats_monthly_report",
+            label = "Baixar relatório mensal da estação (PDF)",
+            class = "btn btn-outline-primary"
+          ),
           
           uiOutput("stats_empty_message")
         )
